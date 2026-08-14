@@ -4,14 +4,20 @@
 mode: monitor
 
 # IPs that are never blocked or rate-limited.
-# MUST list the address you administer the target from, or an enforcing rule
-# can lock you out of the box. Fill in your Windows host's lab address before
-# day 3, when blocking goes in.
-# 192.168.50.11 (attacker VM) is deliberately absent: allowlisting it would
-# make every simulated attack undetectable.
-admin_allowlist:
-  - 127.0.0.1
-  # - 192.168.50.1   # <-- your admin workstation. CONFIRM AND UNCOMMENT.
+#
+# Empty on purpose: the engine refuses to start in enforce mode while this is
+# empty, so blocking cannot go live before the value is set.
+#
+# Do NOT guess your workstation's IP. SSH from Windows arrives through the NAT
+# port-forward, so the target sees the NAT gateway (10.0.2.x), not your Windows
+# address. Run scripts/verify_day1.sh on the target to print the address it
+# actually observes, and put that here.
+#
+# 192.168.50.11 (attacker VM) must never appear here: allowlisting it would
+# make every simulated attack unblockable.
+admin_allowlist: []
+  # - 10.0.2.2      # <-- observed admin address. Fill in from verify_day1.sh.
+  # - 127.0.0.1
 
 sources:
   auth:

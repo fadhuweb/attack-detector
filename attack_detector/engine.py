@@ -12,7 +12,7 @@ import signal
 import sys
 import threading
 
-from .config import load_config
+from .config import load_config, validate_config
 from .collectors.auth_collector import AuthCollector, JournaldAuthCollector
 from .events import Event
 
@@ -50,6 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     config = load_config(args.config)
+
+    errors = validate_config(config)
+    if errors:
+        for error in errors:
+            log.error("config: %s", error)
+        return 2
+
     if args.auth_log:
         config["sources"]["auth"]["type"] = "file"
         config["sources"]["auth"]["path"] = args.auth_log
@@ -67,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     log.info("collector running, mode=%s (day 1: printing only)", config["mode"])
 
     stop = threading.Event()
+    # SIGTERM as well as SIGINT: systemd stops the service with TERM, and the
+    # summary below should still print instead of the process being killed.
     signal.signal(signal.SIGINT, lambda *_: stop.set())
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, lambda *_: stop.set())
     try:
         stop.wait()
     except KeyboardInterrupt:

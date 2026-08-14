@@ -47,11 +47,11 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "ssh_invalid_user",
-        re.compile(rf"Invalid user (?P<user>\S+) from {_IP}"),
+        re.compile(rf"Invalid user (?P<user>\S+) from {_IP}(?: port (?P<port>\d+))?"),
     ),
     (
         "ssh_auth_abort",
-        re.compile(rf"Connection closed by authenticating user (?P<user>\S+) {_IP}"),
+        re.compile(rf"Connection closed by authenticating user (?P<user>\S+) {_IP}(?: port (?P<port>\d+))?"),
     ),
     (
         "ssh_accepted_login",

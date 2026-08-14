@@ -1,3 +1,9 @@
+"""STALE SCAFFOLD -- rewritten on day 3. Do not import.
+
+Alert-only, no firewall block and no allowlist check. The real responder
+replaces this file wholesale.
+"""
+
 import logging
 from pathlib import Path
 

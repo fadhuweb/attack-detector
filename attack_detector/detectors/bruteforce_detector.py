@@ -1,3 +1,10 @@
+"""STALE SCAFFOLD -- rewritten on day 2. Do not import.
+
+Consumes dict-shaped events that no collector produces any more, counts only
+failed logins, and has no per-connection dedupe. The real per-IP sliding-window
+engine replaces this file wholesale.
+"""
+
 import time
 from collections import defaultdict, deque
 

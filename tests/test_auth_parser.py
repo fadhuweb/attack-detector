@@ -54,6 +54,24 @@ def test_invalid_user_line() -> None:
     check("invalid user ip", event.src_ip, "192.168.50.11")
 
 
+def test_spray_attempt_shares_a_dedupe_key() -> None:
+    # One spray attempt against a nonexistent user emits both lines below.
+    # Day 2 counts both event types, so it needs them to collapse to a single
+    # attempt: (src_ip, port) is the key that does it.
+    invalid = parse_line(
+        "Aug 14 11:21:02 target sshd[1310]: Invalid user admin from 192.168.50.11 port 43112"
+    )
+    failed = parse_line(
+        "Aug 14 11:21:02 target sshd[1310]: Failed password for invalid user admin from 192.168.50.11 port 43112 ssh2"
+    )
+    check("invalid-user line carries port", invalid.extra.get("port"), "43112")
+    check(
+        "both lines share one dedupe key",
+        (invalid.src_ip, invalid.extra.get("port")),
+        (failed.src_ip, failed.extra.get("port")),
+    )
+
+
 def test_max_attempts() -> None:
     line = "Aug 14 11:21:08 target sshd[1320]: error: maximum authentication attempts exceeded for root from 192.168.50.11 port 43142 ssh2 [preauth]"
     event = parse_line(line)

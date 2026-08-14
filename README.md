@@ -17,7 +17,9 @@ Code is edited on the Windows workstation and copied to the target to run.
 
 ## Progress
 
-- [x] **Day 1** — repo scaffold, auth-log collector, prints parsed events
+- [~] **Day 1** — repo scaffold, auth-log collector, prints parsed events.
+      Code complete and green on Windows; **not closed until
+      `./scripts/verify_day1.sh` passes on the target** (see below).
 - [ ] Day 2 — per-IP sliding window, brute-force rule, alerts
 - [ ] Day 3 — firewall block via nftables, admin allowlist
 - [ ] Day 4 — off/monitor/enforce controller with hot reload
@@ -82,11 +84,30 @@ python -m tests.test_tailer_rotation
 ```
 
 `test_tailer_rotation` skips its rename-rotation case on Windows, which cannot
-rename an open file. **Run that suite on the target too** — logrotate's default
-is rename-style, so that path only gets real coverage on Linux.
+rename a file while a handle is open. Logrotate's default *is* rename-style, so
+that path has no real coverage until the suite runs on Linux.
+
+## Closing a day
+
+Run on the target:
+
+```bash
+./scripts/verify_day1.sh          # checks + admin address discovery
+./scripts/verify_day1.sh --live   # watch for real failed-password lines
+```
+
+The first form checks the auth log is readable, runs both suites (including the
+rename-rotation case that only works here), and prints the address the target
+observes your admin session on. The second watches for 60s while you SSH from
+the attacker with a wrong password, and passes only if real events arrive.
 
 ## Config
 
-See [config.yaml](config.yaml). Before day 3 adds blocking, set
-`admin_allowlist` to include the address you administer the target from, or an
-enforcing rule can lock you out. The attacker VM must *not* be listed there.
+See [config.yaml](config.yaml). `admin_allowlist` starts **empty**, and the
+engine refuses to start in `enforce` mode while it is — blocking cannot go live
+before the value is set.
+
+Do not guess that value. SSH from Windows arrives through the NAT port-forward,
+so the target sees the NAT gateway (`10.0.2.x`), not your Windows address.
+`verify_day1.sh` prints what it actually observes. The attacker VM
+(`192.168.50.11`) must never be listed.

@@ -1,3 +1,9 @@
+"""STALE SCAFFOLD -- rewritten on day 4. Do not import.
+
+Predates the Event model and the config loader. Kept only as a sketch of the
+mode hot-reload; the real controller replaces this file wholesale.
+"""
+
 import threading
 import time
 import yaml
