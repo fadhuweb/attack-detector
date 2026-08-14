@@ -1,0 +1,8 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+logs/
+*.log
+!tests/sample_auth.log
+.env
