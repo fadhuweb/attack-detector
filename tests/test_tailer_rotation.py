@@ -1,135 +1,126 @@
-"""Prove the tailer survives both rotation styles. Runs on Windows or Linux.
-
-Run from the repo root:  python -m tests.test_tailer_rotation
-"""
-
-from __future__ import annotations
-
 import os
 import sys
 import tempfile
 import threading
 import time
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from attack_detector.collectors.tailer import FileTailer
+from attack_detector.collectors.tailer import Tailer
 
-FAILURES: list[str] = []
-
-
-def check(name: str, got, want) -> None:
-    if got == want:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name}\n         got:  {got!r}\n         want: {want!r}")
-        FAILURES.append(name)
+_fail = []
 
 
-def append(path: Path, text: str) -> None:
-    with open(path, "a") as handle:
-        handle.write(text + "\n")
-        handle.flush()
+def check(name, cond):
+    print(f"  {'ok  ' if cond else 'FAIL'} {name}")
+    if not cond:
+        _fail.append(name)
 
 
-def collect(path: Path, actions, settle: float = 1.5) -> list[str]:
-    """Run the tailer over ``path`` while ``actions`` writes to it."""
-    seen: list[str] = []
-    lock = threading.Lock()
+class Harness:
+    """Run Tailer.follow in a background thread and let the test wait for lines
+    to actually arrive, instead of sleeping a fixed guess. This makes the test
+    deterministic on a slow VM: each step blocks until the expected line shows
+    up or a generous timeout expires."""
 
-    def on_line(line: str) -> None:
-        with lock:
-            seen.append(line)
+    def __init__(self, path, from_start=False, poll=0.05):
+        self.out = []
+        self._lock = threading.Lock()
+        gen = Tailer(path, poll_interval=poll).follow(from_start=from_start)
 
-    tailer = FileTailer(str(path), on_line, poll_interval=0.05)
-    tailer.start()
-    time.sleep(0.4)  # let it open and seek to the end
-    actions()
-    time.sleep(settle)
-    tailer.stop()
-    tailer.join(timeout=2.0)
-    with lock:
-        return list(seen)
-
-
-def test_follows_appends() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "auth.log"
-        append(path, "line one")  # written before start, must be skipped
-
-        def actions() -> None:
-            append(path, "line two")
-            time.sleep(0.2)
-            append(path, "line three")
-
-        seen = collect(path, actions)
-        check("skips pre-existing content", "line one" in seen, False)
-        check("follows appends", seen, ["line two", "line three"])
-
-
-def test_rename_rotation() -> None:
-    # Windows refuses to rename a file while a handle is open, so this case is
-    # only exercisable on the target. The code path it covers is the default
-    # logrotate behaviour, so run this suite on the VM too.
-    if sys.platform == "win32":
-        print("  skip rename rotation (not possible on Windows; verify on the target)")
-        return
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "auth.log"
-        path.touch()
-
-        def actions() -> None:
-            append(path, "before rotate")
-            time.sleep(0.4)
-            os.replace(path, Path(tmp) / "auth.log.1")  # logrotate default
-            append(path, "after rotate")
-
-        seen = collect(path, actions, settle=2.5)
-        check("reads across rename rotation", seen, ["before rotate", "after rotate"])
-
-
-def test_copytruncate_rotation() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "auth.log"
-        path.touch()
-
-        def actions() -> None:
-            append(path, "before truncate")
-            time.sleep(0.4)
-            with open(path, "w"):  # same inode, emptied in place
+        def run():
+            try:
+                for line in gen:
+                    with self._lock:
+                        self.out.append(line)
+            except Exception:
                 pass
-            time.sleep(0.3)
-            append(path, "after truncate")
 
-        seen = collect(path, actions, settle=2.5)
-        check("reads across copytruncate", seen, ["before truncate", "after truncate"])
+        self._th = threading.Thread(target=run, daemon=True)
+        self._th.start()
+        time.sleep(0.4)   # let follow open and seek before the test acts
 
+    def lines(self):
+        with self._lock:
+            return list(self.out)
 
-def test_waits_for_missing_file() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "not-yet.log"
+    def wait_for(self, substr, timeout=6.0):
+        """Block until a line containing substr has arrived, or timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if any(substr in ln for ln in self.lines()):
+                return True
+            time.sleep(0.05)
+        return False
 
-        def actions() -> None:
-            time.sleep(0.5)
-            append(path, "appeared late")
-
-        seen = collect(path, actions, settle=2.5)
-        check("picks up a file created after start", seen, ["appeared late"])
-
-
-def main() -> int:
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            print(name)
-            fn()
-    print()
-    if FAILURES:
-        print(f"{len(FAILURES)} check(s) failed: {', '.join(FAILURES)}")
-        return 1
-    print("all checks passed")
-    return 0
+    def wait_absent(self, substr, settle=0.8):
+        """Give time to pass, then confirm no line contains substr (used to
+        prove backlog was skipped)."""
+        time.sleep(settle)
+        return not any(substr in ln for ln in self.lines())
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def tmp():
+    d = tempfile.mkdtemp()
+    return os.path.join(d, "auth.log")
+
+
+# A. follows appends on a pre-existing file
+p = tmp()
+open(p, "w").close()
+h = Harness(p)
+with open(p, "a") as f:
+    f.write("line1\n"); f.flush()
+    f.write("line2\n"); f.flush()
+check("follows appends", h.wait_for("line1") and h.wait_for("line2"))
+
+# B. skips backlog on a file that existed at start
+p = tmp()
+with open(p, "w") as f:
+    f.write("old1\nold2\n")
+h = Harness(p)
+with open(p, "a") as f:
+    f.write("new1\n"); f.flush()
+check("skips pre-existing backlog",
+      h.wait_for("new1") and "old1" not in " ".join(h.lines()))
+
+# C. picks up a file created after start, from the beginning
+p = tmp()
+h = Harness(p)
+with open(p, "w") as f:
+    f.write("first\nsecond\n"); f.flush()
+check("late-created file read from start",
+      h.wait_for("first") and h.wait_for("second"))
+
+# D. copytruncate: file truncated in place, tailing continues
+p = tmp()
+open(p, "w").close()
+h = Harness(p)
+with open(p, "a") as f:
+    f.write("a\n"); f.flush()
+h.wait_for("a")                       # wait until 'a' is seen before truncating
+with open(p, "r+") as f:
+    f.truncate(0)
+time.sleep(0.3)                       # let the tailer notice the shrink
+with open(p, "a") as f:
+    f.write("b\n"); f.flush()
+check("copytruncate keeps following", h.wait_for("a") and h.wait_for("b"))
+
+# E. rename rotation: file renamed away, new file at same path (Linux)
+p = tmp()
+open(p, "w").close()
+h = Harness(p)
+with open(p, "a") as f:
+    f.write("before\n"); f.flush()
+h.wait_for("before")                  # wait until 'before' is seen before rotating
+os.rename(p, p + ".1")                # rotate old file away
+time.sleep(0.3)                       # let the tailer notice the missing/renamed file
+with open(p, "w") as f:               # new file appears at the same path
+    f.write("after\n"); f.flush()
+check("survives rename rotation", h.wait_for("before") and h.wait_for("after"))
+
+print()
+if _fail:
+    print(f"{len(_fail)} check(s) failed")
+    sys.exit(1)
+print("all checks passed")

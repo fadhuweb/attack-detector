@@ -58,11 +58,11 @@ fi
 
 hr
 echo "2/4  parser tests"
-"$PY" -m tests.test_auth_parser || fail=1
+"$PY" tests/test_auth_parser.py || fail=1
 
 hr
 echo "3/4  tailer rotation tests   <-- the rename case only runs here"
-"$PY" -m tests.test_tailer_rotation || fail=1
+"$PY" tests/test_tailer_rotation.py || fail=1
 
 hr
 echo "4/4  admin allowlist candidates"

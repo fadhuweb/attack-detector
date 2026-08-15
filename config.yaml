@@ -1,35 +1,27 @@
-# attack-detector configuration. Reloaded live from day 4 onward.
+mode: monitor            # off | monitor | enforce
+                         #   off     = do nothing
+                         #   monitor = detect + alert, never block  (safe default)
+                         #   enforce = detect + alert + block offenders via nftables
+                         # change this live without restart: use ctl.py or edit control.json
+auth_source: file        # file | journald
+auth_log: /var/log/auth.log
+journald_unit: ssh
+from_start: false
 
-# off | monitor | enforce
-mode: monitor
+admin_allowlist: ["10.0.2.2"]   # never blocked. YOUR admin path.
+                         # enforce REFUSES to start (and refuses a live switch)
+                         # if this is empty. Do NOT put 192.168.50.11 here.
 
-# IPs that are never blocked or rate-limited.
-#
-# Empty on purpose: the engine refuses to start in enforce mode while this is
-# empty, so blocking cannot go live before the value is set.
-#
-# Do NOT guess your workstation's IP. SSH from Windows arrives through the NAT
-# port-forward, so the target sees the NAT gateway (10.0.2.x), not your Windows
-# address. Run scripts/verify_day1.sh on the target to print the address it
-# actually observes, and put that here.
-#
-# 192.168.50.11 (attacker VM) must never appear here: allowlisting it would
-# make every simulated attack unblockable.
-admin_allowlist: []
-  # - 10.0.2.2      # <-- observed admin address. Fill in from verify_day1.sh.
-  # - 127.0.0.1
+responder_backend: nftables   # nftables (real blocking) | memory (dry run, logs only)
+alert_log: alerts.log
+responder_log: responder.log
 
-sources:
-  auth:
-    # "file" for hosts with rsyslog (the lab target). "journald" for hosts
-    # where /var/log/auth.log does not exist.
-    type: file
-    path: /var/log/auth.log
-    unit: ssh
+# live control surface (day 4)
+control_state: control.json      # {"mode": "..."} desired mode; engine polls it
+control_commands: commands.jsonl # queued commands (unblock/block); engine drains it
+control_status: status.json      # engine writes current state here for the dashboard
 
-thresholds:
-  failed_login: 5
-  failed_login_window: 60
-
-alerts:
-  path: logs/alerts.log
+# brute-force rule
+bf_window: 60
+bf_threshold: 5
+bf_pair_grace: 3.0

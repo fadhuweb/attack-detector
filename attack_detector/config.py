@@ -1,79 +1,98 @@
-"""Load config.yaml, filling in defaults for anything absent."""
+import os
+from dataclasses import dataclass
 
-from __future__ import annotations
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
-import copy
-from pathlib import Path
-from typing import Any
+VALID_MODES = ("off", "monitor", "enforce")
 
-import yaml
-
-MODES = ("off", "monitor", "enforce")
-
-DEFAULTS: dict[str, Any] = {
+DEFAULTS = {
     "mode": "monitor",
-    # Deliberately empty. An unset allowlist must never be mistaken for a safe
-    # one, so enforce mode refuses to start until it is filled in -- see
-    # validate_config below.
+    "auth_source": "file",
+    "auth_log": "/var/log/auth.log",
+    "journald_unit": "ssh",
+    "from_start": False,
     "admin_allowlist": [],
-    "sources": {
-        "auth": {
-            # "file" reads the path below; "journald" shells out to journalctl
-            # for hosts with no rsyslog.
-            "type": "file",
-            "path": "/var/log/auth.log",
-            "unit": "ssh",
-        },
-    },
-    "thresholds": {
-        "failed_login": 5,
-        "failed_login_window": 60,
-    },
-    "alerts": {
-        "path": "logs/alerts.log",
-    },
+    "alert_log": "alerts.log",
+    "responder_backend": "nftables",   # nftables | memory (memory = dry run)
+    "responder_log": "responder.log",
+    "control_state": "control.json",
+    "control_commands": "commands.jsonl",
+    "control_status": "status.json",
+    # brute-force rule
+    "bf_window": 60,
+    "bf_threshold": 5,
+    "bf_pair_grace": 3.0,
 }
 
 
-def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    out = copy.deepcopy(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _merge(out[key], value)
-        else:
-            out[key] = value
-    return out
+@dataclass
+class Config:
+    mode: str
+    auth_source: str
+    auth_log: str
+    journald_unit: str
+    from_start: bool
+    admin_allowlist: list
+    alert_log: str
+    responder_backend: str
+    responder_log: str
+    control_state: str
+    control_commands: str
+    control_status: str
+    bf_window: int
+    bf_threshold: int
+    bf_pair_grace: float
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
-    path = Path(path)
-    if not path.exists():
-        return copy.deepcopy(DEFAULTS)
-    with open(path, "r", errors="replace") as handle:
-        loaded = yaml.safe_load(handle) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{path} must contain a YAML mapping at the top level")
-    return _merge(DEFAULTS, loaded)
+class ConfigError(Exception):
+    pass
 
 
-def validate_config(config: dict[str, Any]) -> list[str]:
-    """Return the reasons this config must not be run, empty if it is fine."""
-    errors: list[str] = []
+def load_config(path=None, overrides=None):
+    data = dict(DEFAULTS)
+    if path and os.path.exists(path):
+        if yaml is None:
+            raise RuntimeError("PyYAML not installed; pip install -r requirements.txt")
+        with open(path) as f:
+            loaded = yaml.safe_load(f) or {}
+        data.update({k: v for k, v in loaded.items() if v is not None})
+    if overrides:
+        data.update({k: v for k, v in overrides.items() if v is not None})
 
-    mode = config.get("mode")
-    if mode not in MODES:
-        errors.append(f"mode is {mode!r}, expected one of {', '.join(MODES)}")
+    cfg = Config(
+        mode=data["mode"],
+        auth_source=data["auth_source"],
+        auth_log=data["auth_log"],
+        journald_unit=data["journald_unit"],
+        from_start=bool(data["from_start"]),
+        admin_allowlist=list(data["admin_allowlist"] or []),
+        alert_log=data["alert_log"],
+        responder_backend=data["responder_backend"],
+        responder_log=data["responder_log"],
+        control_state=data["control_state"],
+        control_commands=data["control_commands"],
+        control_status=data["control_status"],
+        bf_window=int(data["bf_window"]),
+        bf_threshold=int(data["bf_threshold"]),
+        bf_pair_grace=float(data["bf_pair_grace"]),
+    )
+    validate_config(cfg)
+    return cfg
 
-    if mode == "enforce" and not config.get("admin_allowlist"):
-        errors.append(
+
+def validate_config(cfg):
+    """Raise ConfigError on a config that is unsafe to run. The important rule:
+    enforce mode with an empty allowlist can block the operator's own admin
+    address and lock them out, so it is refused."""
+    if cfg.mode not in VALID_MODES:
+        raise ConfigError(f"mode must be one of {VALID_MODES}, got '{cfg.mode}'")
+    if cfg.mode == "enforce" and not cfg.admin_allowlist:
+        raise ConfigError(
             "mode is 'enforce' but admin_allowlist is empty. Enforcing with no "
             "allowlist can block the address you administer this host from and "
-            "lock you out. Set admin_allowlist in config.yaml first -- run "
-            "scripts/verify_day1.sh to see the address the target sees you on."
-        )
-
-    source = config.get("sources", {}).get("auth", {})
-    if source.get("type") not in ("file", "journald"):
-        errors.append(f"sources.auth.type is {source.get('type')!r}, expected 'file' or 'journald'")
-
-    return errors
+            "lock you out. Set admin_allowlist in config.yaml first. SSH via "
+            "VirtualBox NAT arrives as 10.0.2.2; confirm yours with: who")
+    return cfg

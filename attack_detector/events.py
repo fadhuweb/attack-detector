@@ -1,35 +1,36 @@
-"""The record every collector produces and every detector consumes."""
-
 from __future__ import annotations
-
-import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
+import time
+
+SSH_FAILED_LOGIN = "ssh_failed_login"
+SSH_INVALID_USER = "ssh_invalid_user"
+SSH_AUTH_ABORT = "ssh_auth_abort"
+SSH_ACCEPTED_LOGIN = "ssh_accepted_login"
 
 
 @dataclass
 class Event:
-    """One parsed occurrence from a source.
+    etype: str
+    source_ip: str
+    ingest_ts: float = field(default_factory=time.time)  # when we saw it; windows use this
+    log_ts: Optional[str] = None                          # raw log time, display only
+    user: Optional[str] = None
+    port: Optional[int] = None
+    method: Optional[str] = None
+    raw: Optional[str] = None
 
-    ``ts`` is ingest time, and it is what the sliding-window counters use. It
-    stays monotonic with the running engine even when a log line carries a
-    stale or clock-skewed timestamp. ``log_ts`` keeps the time the source
-    itself claimed, which is what we want for display and for replaying an
-    existing file after the fact.
-    """
+    def dedupe_key(self):
+        # one connection attempt shares (ip, port) across its invalid-user
+        # and failed-password lines; day 2 collapses on this.
+        return (self.source_ip, self.port)
 
-    event_type: str
-    src_ip: Optional[str] = None
-    source: str = ""
-    ts: float = field(default_factory=time.time)
-    log_ts: Optional[float] = None
-    raw: str = ""
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    def __str__(self) -> str:
-        stamp = time.strftime("%H:%M:%S", time.localtime(self.log_ts or self.ts))
-        detail = " ".join(f"{k}={v}" for k, v in self.extra.items())
-        return (
-            f"{stamp} [{self.source}] {self.event_type} "
-            f"src={self.src_ip or '-'}{' ' + detail if detail else ''}"
-        )
+    def __str__(self):
+        parts = [f"[{self.etype}]", f"src={self.source_ip}"]
+        if self.user is not None:
+            parts.append(f"user={self.user}")
+        if self.port is not None:
+            parts.append(f"port={self.port}")
+        if self.method is not None:
+            parts.append(f"method={self.method}")
+        return " ".join(parts)

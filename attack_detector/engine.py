@@ -1,94 +1,124 @@
-"""Engine entrypoint.
-
-Day 1 scope: stand up the auth collector and print every event it parses.
-Detection, response and the mode toggle arrive on the following days.
-"""
-
-from __future__ import annotations
-
 import argparse
-import logging
 import signal
 import sys
 import threading
+from datetime import datetime
 
-from .config import load_config, validate_config
-from .collectors.auth_collector import AuthCollector, JournaldAuthCollector
-from .events import Event
-
-DEFAULT_CONFIG = "config.yaml"
-log = logging.getLogger("attack_detector")
-
-
-def build_auth_collector(config: dict, on_event, from_start: bool):
-    source = config["sources"]["auth"]
-    if source.get("type") == "journald":
-        log.info("auth source: journald unit=%s", source.get("unit", "ssh"))
-        return JournaldAuthCollector(on_event, unit=source.get("unit", "ssh"))
-    log.info("auth source: file %s", source["path"])
-    return AuthCollector(source["path"], on_event, from_start=from_start)
+from .config import load_config, ConfigError
+from .collectors.auth_collector import AuthCollector
+from .detectors.bruteforce import BruteForceDetector
+from .alerting import Alerter
+from .responder import Responder, make_backend
+from .controller import Controller
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="attack-detector")
-    parser.add_argument("-c", "--config", default=DEFAULT_CONFIG)
-    parser.add_argument(
-        "--auth-log",
-        help="override the configured auth log path (useful for replaying a sample)",
+def _handle(signum, frame):
+    raise KeyboardInterrupt
+
+
+def _log(msg):
+    print(f"{datetime.now():%H:%M:%S} {msg}", flush=True)
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        description="attack-detector (day 4: live control without restart)"
     )
-    parser.add_argument(
-        "--from-start",
-        action="store_true",
-        help="read the log from its beginning instead of following new lines only",
-    )
-    args = parser.parse_args(argv)
+    p.add_argument("-c", "--config")
+    p.add_argument("--auth-source", choices=["file", "journald"])
+    p.add_argument("--auth-log")
+    p.add_argument("--mode", choices=["off", "monitor", "enforce"])
+    p.add_argument("--from-start", action="store_true", default=None)
+    p.add_argument("--print-events", action="store_true")
+    args = p.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    config = load_config(args.config)
-
-    errors = validate_config(config)
-    if errors:
-        for error in errors:
-            log.error("config: %s", error)
+    try:
+        cfg = load_config(args.config, overrides={
+            "auth_source": args.auth_source,
+            "auth_log": args.auth_log,
+            "mode": args.mode,
+            "from_start": args.from_start,
+        })
+    except ConfigError as e:
+        _log(f"ERROR config: {e}")
         return 2
 
-    if args.auth_log:
-        config["sources"]["auth"]["type"] = "file"
-        config["sources"]["auth"]["path"] = args.auth_log
+    signal.signal(signal.SIGTERM, _handle)
 
-    counts: dict[str, int] = {}
-    lock = threading.Lock()
+    detector = BruteForceDetector(
+        window_seconds=cfg.bf_window,
+        threshold=cfg.bf_threshold,
+        pair_grace=cfg.bf_pair_grace,
+    )
+    alerter = Alerter(path=cfg.alert_log)
 
-    def on_event(event: Event) -> None:
-        with lock:
-            counts[event.event_type] = counts.get(event.event_type, 0) + 1
-        print(event, flush=True)
+    try:
+        backend = make_backend(cfg.responder_backend)
+    except RuntimeError as e:
+        _log(f"ERROR responder: {e}")
+        return 2
+    responder = Responder(cfg.mode, cfg.admin_allowlist, backend,
+                          log_path=cfg.responder_log)
 
-    collector = build_auth_collector(config, on_event, args.from_start)
-    collector.start()
-    log.info("collector running, mode=%s (day 1: printing only)", config["mode"])
+    def on_mode_change(old, new):
+        _log(f"mode changed live: {old} -> {new}")
+
+    controller = Controller(
+        responder, detector, alerter,
+        state_path=cfg.control_state,
+        command_path=cfg.control_commands,
+        status_path=cfg.control_status,
+        on_mode_change=on_mode_change,
+    )
+
+    if cfg.auth_source == "journald":
+        _log(f"auth source: journald unit={cfg.journald_unit}")
+    else:
+        _log(f"auth source: file {cfg.auth_log}")
+    _log(f"brute-force rule: >{cfg.bf_threshold} failed logins per IP in {cfg.bf_window}s")
+    _log(f"mode={cfg.mode}  responder={cfg.responder_backend}  allowlist={cfg.admin_allowlist}")
+    _log(f"live control: edit {cfg.control_state} or use ctl.py; status in {cfg.control_status}")
+
+    controller.start()
+
+    def on_alert(ip, count, reason):
+        alerter.fire("bruteforce", ip, count, reason, responder.mode)
+        result = responder.handle_alert(ip, count, reason)
+        if result == "skipped-allowlist":
+            _log(f"note: {ip} is allowlisted; alerted but not blocked")
 
     stop = threading.Event()
-    # SIGTERM as well as SIGINT: systemd stops the service with TERM, and the
-    # summary below should still print instead of the process being killed.
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, lambda *_: stop.set())
+
+    def ticker():
+        while not stop.wait(1.0):
+            for ip, count, reason in detector.tick():
+                on_alert(ip, count, reason)
+
+    th = threading.Thread(target=ticker, daemon=True)
+    th.start()
+
+    collector = AuthCollector(
+        source=cfg.auth_source,
+        path=cfg.auth_log,
+        unit=cfg.journald_unit,
+        from_start=cfg.from_start,
+    )
     try:
-        stop.wait()
+        for ev in collector.events():
+            if args.print_events:
+                print(f"{ev.log_ts or '-'} [auth] {ev}", flush=True)
+            for ip, count, reason in detector.observe(ev):
+                on_alert(ip, count, reason)
     except KeyboardInterrupt:
         pass
+    finally:
+        stop.set()
+        controller.stop()
 
-    collector.stop()
-    collector.join(timeout=2.0)
-    with lock:
-        summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "none"
-    log.info("stopped. events seen: %s", summary)
+    if responder.blocked_ips():
+        _log(f"blocked this session: {responder.blocked_ips()}")
+        _log("remove all with: sudo nft flush table inet attack_detector")
+    _log("collector stopped")
     return 0
 
 

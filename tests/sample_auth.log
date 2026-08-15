@@ -1,14 +1,9 @@
-Aug 14 11:20:01 target sshd[1201]: Server listening on 0.0.0.0 port 22.
-Aug 14 11:20:14 target sshd[1240]: Accepted publickey for fadhl from 192.168.50.1 port 51000 ssh2: RSA SHA256:abc123
-Aug 14 11:20:15 target systemd-logind[820]: New session 3 of user fadhl.
-Aug 14 11:21:02 target sshd[1310]: Invalid user admin from 192.168.50.11 port 43112
-Aug 14 11:21:02 target sshd[1310]: Failed password for invalid user admin from 192.168.50.11 port 43112 ssh2
-Aug 14 11:21:03 target sshd[1310]: Connection closed by authenticating user admin 192.168.50.11 port 43112 [preauth]
-Aug 14 11:21:04 target sshd[1312]: Failed password for root from 192.168.50.11 port 43118 ssh2
-Aug 14 11:21:05 target sshd[1314]: Failed password for root from 192.168.50.11 port 43124 ssh2
-Aug 14 11:21:06 target sshd[1316]: Failed password for invalid user oracle from 192.168.50.11 port 43130 ssh2
-Aug 14 11:21:07 target sshd[1318]: Failed password for root from 192.168.50.11 port 43136 ssh2
-Aug 14 11:21:08 target sshd[1320]: error: maximum authentication attempts exceeded for root from 192.168.50.11 port 43142 ssh2 [preauth]
-Aug 14 11:21:30 target CRON[1400]: pam_unix(cron:session): session opened for user root(uid=0)
-Aug 14 11:22:00 target sshd[1450]: Accepted password for fadhl from 192.168.50.1 port 51044 ssh2
-2026-08-14T11:23:11.482913+00:00 target sshd[1502]: Failed password for backup from 192.168.50.11 port 44002 ssh2
+Aug 14 20:39:20 target sshd[1201]: Accepted publickey for fadhl from 192.168.50.1 port 51000 ssh2: RSA SHA256:abc123
+Aug 14 20:39:22 target sshd[1234]: Failed password for fadhl from 192.168.50.11 port 43112 ssh2
+Aug 14 20:39:23 target sshd[1235]: Invalid user admin from 192.168.50.11 port 43120
+Aug 14 20:39:23 target sshd[1235]: Failed password for invalid user admin from 192.168.50.11 port 43120 ssh2
+Aug 14 20:39:25 target sshd[1240]: error: maximum authentication attempts exceeded for fadhl from 192.168.50.11 port 43130 ssh2 [preauth]
+Aug 14 20:39:26 target systemd[1]: Started Session 5 of user fadhl.
+2026-08-14T20:39:27.123456+00:00 target sshd[1250]: Failed password for root from 192.168.50.11 port 43140 ssh2
+Dec 31 23:59:59 target sshd[1300]: Failed password for fadhl from 192.168.50.11 port 44000 ssh2
+Jan  1 00:00:01 target sshd[1301]: Failed password for fadhl from 192.168.50.11 port 44001 ssh2
