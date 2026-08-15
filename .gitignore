@@ -1,8 +1,4 @@
-.venv/
-venv/
 __pycache__/
-*.py[cod]
-logs/
+*.pyc
+.venv/
 *.log
-!tests/sample_auth.log
-.env
