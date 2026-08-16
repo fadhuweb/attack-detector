@@ -25,6 +25,12 @@ DEFAULTS = {
     "bf_window": 60,
     "bf_threshold": 5,
     "bf_pair_grace": 3.0,
+    # aggregate flood rule (DDoS / volumetric)
+    "access_log": "/var/log/nginx/access.log",
+    "flood_enabled": True,
+    "flood_window": 10,
+    "flood_threshold": 2000,
+    "flood_cooldown": 30,
 }
 
 
@@ -45,6 +51,11 @@ class Config:
     bf_window: int
     bf_threshold: int
     bf_pair_grace: float
+    access_log: str
+    flood_enabled: bool
+    flood_window: int
+    flood_threshold: int
+    flood_cooldown: int
 
 
 class ConfigError(Exception):
@@ -78,6 +89,11 @@ def load_config(path=None, overrides=None):
         bf_window=int(data["bf_window"]),
         bf_threshold=int(data["bf_threshold"]),
         bf_pair_grace=float(data["bf_pair_grace"]),
+        access_log=data["access_log"],
+        flood_enabled=bool(data["flood_enabled"]),
+        flood_window=int(data["flood_window"]),
+        flood_threshold=int(data["flood_threshold"]),
+        flood_cooldown=int(data["flood_cooldown"]),
     )
     validate_config(cfg)
     return cfg

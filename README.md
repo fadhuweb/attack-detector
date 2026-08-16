@@ -74,6 +74,27 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Aggregate flood detection (day 8)
+
+A second detector counts TOTAL http requests across all source IPs in a short
+window and fires above a ceiling. This catches a distributed flood that per-IP
+rules miss: when a flood is spread across thousands of IPs, no single IP crosses
+a per-IP threshold, but the total volume is far above normal.
+
+- reads the nginx access log (access_log in config.yaml)
+- fires on flood_threshold total requests in flood_window seconds
+- reports the heaviest source IPs in the alert, though the fire decision is the
+  aggregate total, not any one IP
+- a distributed flood has no single IP to block, so day 8 alerts only.
+  Rate-limiting as the flood response is day 10.
+
+Simulate a distributed flood from the attacker (many parallel workers):
+
+    ab -n 5000 -c 200 http://192.168.50.10/        # apache bench, one host many requests
+    # or spread across fake sources with parallel curl loops
+
+Tune flood_threshold above your normal peak traffic, or it will false-fire.
+
 ## Live control without restart (day 4)
 
 The engine watches control files while it runs. Change mode or release an IP with

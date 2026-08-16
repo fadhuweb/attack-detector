@@ -25,3 +25,12 @@ control_status: status.json      # engine writes current state here for the dash
 bf_window: 60
 bf_threshold: 5
 bf_pair_grace: 3.0
+
+# aggregate flood rule (DDoS / volumetric) -- reads the nginx access log
+access_log: /var/log/nginx/access.log
+flood_enabled: true
+flood_window: 10        # seconds
+flood_threshold: 2000   # TOTAL requests across all IPs in the window fires
+                        # set this above your normal peak. a distributed flood
+                        # trips this even when no single IP looks busy.
+flood_cooldown: 30      # seconds between flood alerts, so one flood alerts once
