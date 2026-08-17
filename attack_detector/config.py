@@ -31,6 +31,10 @@ DEFAULTS = {
     "flood_window": 10,
     "flood_threshold": 2000,
     "flood_cooldown": 30,
+    # per-IP request rate rule (single-source flood)
+    "req_window": 5,
+    "req_threshold": 100,
+    "req_cooldown": 30,
 }
 
 
@@ -56,6 +60,9 @@ class Config:
     flood_window: int
     flood_threshold: int
     flood_cooldown: int
+    req_window: int
+    req_threshold: int
+    req_cooldown: int
 
 
 class ConfigError(Exception):
@@ -94,6 +101,9 @@ def load_config(path=None, overrides=None):
         flood_window=int(data["flood_window"]),
         flood_threshold=int(data["flood_threshold"]),
         flood_cooldown=int(data["flood_cooldown"]),
+        req_window=int(data["req_window"]),
+        req_threshold=int(data["req_threshold"]),
+        req_cooldown=int(data["req_cooldown"]),
     )
     validate_config(cfg)
     return cfg

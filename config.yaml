@@ -34,3 +34,8 @@ flood_threshold: 2000   # TOTAL requests across all IPs in the window fires
                         # set this above your normal peak. a distributed flood
                         # trips this even when no single IP looks busy.
 flood_cooldown: 30      # seconds between flood alerts, so one flood alerts once
+
+# per-IP request rate rule (single-source http flood)
+req_window: 5           # seconds
+req_threshold: 100      # requests from ONE IP in the window fires
+req_cooldown: 30        # seconds between per-IP flood alerts for the same IP

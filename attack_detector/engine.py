@@ -9,6 +9,7 @@ from .collectors.auth_collector import AuthCollector
 from .collectors.access_collector import AccessCollector
 from .detectors.bruteforce import BruteForceDetector
 from .detectors.flood import AggregateFloodDetector
+from .detectors.request_rate import PerIPRequestDetector
 from .alerting import Alerter
 from .responder import Responder, make_backend
 from .controller import Controller
@@ -52,6 +53,8 @@ def main(argv=None):
     bf = BruteForceDetector(cfg.bf_window, cfg.bf_threshold, cfg.bf_pair_grace)
     flood = AggregateFloodDetector(cfg.flood_window, cfg.flood_threshold,
                                    cfg.flood_cooldown)
+    reqrate = PerIPRequestDetector(cfg.req_window, cfg.req_threshold,
+                                   cfg.req_cooldown)
     alerter = Alerter(path=cfg.alert_log)
 
     try:
@@ -76,7 +79,8 @@ def main(argv=None):
         _log(f"auth source: file {cfg.auth_log}")
     _log(f"brute-force rule: >{cfg.bf_threshold} failed logins per IP in {cfg.bf_window}s")
     if cfg.flood_enabled:
-        _log(f"flood rule: >{cfg.flood_threshold} total requests in {cfg.flood_window}s "
+        _log(f"flood rule (aggregate): >{cfg.flood_threshold} total requests in {cfg.flood_window}s")
+        _log(f"flood rule (per-IP): >{cfg.req_threshold} requests per IP in {cfg.req_window}s "
              f"(reads {cfg.access_log})")
     _log(f"mode={cfg.mode}  responder={cfg.responder_backend}  allowlist={cfg.admin_allowlist}")
 
@@ -85,6 +89,13 @@ def main(argv=None):
     def on_bruteforce(ip, count, reason):
         alerter.fire("bruteforce", ip, count, reason, responder.mode)
         result = responder.handle_alert(ip, count, reason)
+        if result == "skipped-allowlist":
+            _log(f"note: {ip} is allowlisted; alerted but not blocked")
+
+    def on_reqrate(ip, count):
+        alerter.fire("request_flood", ip, count,
+                     "single-source request flood", responder.mode)
+        result = responder.handle_alert(ip, count, "single-source request flood")
         if result == "skipped-allowlist":
             _log(f"note: {ip} is allowlisted; alerted but not blocked")
 
@@ -115,6 +126,9 @@ def main(argv=None):
                 res = flood.observe(ev)
                 if res:
                     on_flood(res[0], res[1])
+                r2 = reqrate.observe(ev)
+                if r2:
+                    on_reqrate(r2[0], r2[1])
         except Exception as e:
             _log(f"access collector stopped: {e}")
 

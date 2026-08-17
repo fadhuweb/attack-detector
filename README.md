@@ -74,6 +74,32 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Distributed vs single-source floods (day 9)
+
+Two request-rate rules run on the access log:
+- aggregate (day 8): total requests across all IPs -> catches distributed floods.
+- per-IP (day 9): requests from one IP -> catches single-source floods.
+
+The point of running both is the contrast:
+- a DISTRIBUTED flood trips the aggregate rule but NOT the per-IP rule, because
+  no single IP is individually busy.
+- a SINGLE-SOURCE flood trips both.
+
+Simulate each with the included tool (writes to the access log the engine tails):
+
+    # distributed: many IPs, few requests each -> aggregate fires, per-IP quiet
+    sudo python3 scripts/simulate_flood.py --distributed --requests 3000 --ips 500 \
+        --log /var/log/nginx/access.log
+
+    # single-source: one IP, all requests -> both fire
+    sudo python3 scripts/simulate_flood.py --single --requests 3000 \
+        --ip 192.168.50.11 --log /var/log/nginx/access.log
+
+For a real network-level single-source flood, ab from the attacker VM also works:
+    ab -n 5000 -c 200 http://192.168.50.10/
+Spoofing many real source IPs over the lab network is unreliable through NAT, so
+the simulator is the deterministic way to exercise the distributed case.
+
 ## Aggregate flood detection (day 8)
 
 A second detector counts TOTAL http requests across all source IPs in a short
