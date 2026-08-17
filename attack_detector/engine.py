@@ -10,6 +10,7 @@ from .collectors.access_collector import AccessCollector
 from .detectors.bruteforce import BruteForceDetector
 from .detectors.flood import AggregateFloodDetector
 from .detectors.request_rate import PerIPRequestDetector
+from .detectors.connstate import ConnStateDetector
 from .alerting import Alerter
 from .responder import Responder, make_backend
 from .controller import Controller
@@ -55,6 +56,8 @@ def main(argv=None):
                                    cfg.flood_cooldown)
     reqrate = PerIPRequestDetector(cfg.req_window, cfg.req_threshold,
                                    cfg.req_cooldown)
+    connstate = ConnStateDetector(cfg.syn_threshold, cfg.conn_threshold,
+                                  cooldown=cfg.connstate_cooldown)
     alerter = Alerter(path=cfg.alert_log)
 
     try:
@@ -82,6 +85,9 @@ def main(argv=None):
         _log(f"flood rule (aggregate): >{cfg.flood_threshold} total requests in {cfg.flood_window}s")
         _log(f"flood rule (per-IP): >{cfg.req_threshold} requests per IP in {cfg.req_window}s "
              f"(reads {cfg.access_log})")
+    if cfg.connstate_enabled:
+        _log(f"conn-state rule: >{cfg.syn_threshold} SYN-RECV (syn flood), "
+             f">{cfg.conn_threshold} conns/IP (slowloris), sampled every {cfg.connstate_interval}s")
     _log(f"mode={cfg.mode}  responder={cfg.responder_backend}  allowlist={cfg.admin_allowlist}")
 
     controller.start()
@@ -118,6 +124,34 @@ def main(argv=None):
                 on_bruteforce(ip, count, reason)
 
     threading.Thread(target=ticker, daemon=True).start()
+
+    def on_connstate(kind, key, count):
+        if kind == "syn_flood":
+            alerter.fire("syn_flood", "aggregate", count,
+                         f"{count} half-open (SYN-RECV) connections", responder.mode)
+            _log(f"SYN-FLOOD alert: {count} half-open connections")
+            # a SYN flood is often spoofed sources; no single IP to block.
+            # alert is the action here.
+        elif kind == "conn_hold":
+            alerter.fire("conn_hold", key, count,
+                         f"{count} held-open connections (slowloris shape)",
+                         responder.mode)
+            result = responder.handle_alert(key, count, "connection-holding (slowloris)")
+            if result == "skipped-allowlist":
+                _log(f"note: {key} is allowlisted; alerted but not blocked")
+            elif result == "blocked":
+                _log(f"BLOCK {key}: holding {count} connections (slowloris)")
+
+    def connstate_loop():
+        while not stop.wait(cfg.connstate_interval):
+            try:
+                for kind, key, count in connstate.sample():
+                    on_connstate(kind, key, count)
+            except Exception as e:
+                _log(f"connstate sample error: {e}")
+
+    if cfg.connstate_enabled:
+        threading.Thread(target=connstate_loop, daemon=True).start()
 
     # access-log collector runs in its own thread feeding the flood detector
     def access_loop():

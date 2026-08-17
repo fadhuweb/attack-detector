@@ -74,6 +74,32 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Connection-state rule: SYN flood and Slowloris (day 11)
+
+These attacks carry almost no request volume, so every log-based rule misses
+them. This rule samples the TCP connection table with `ss` on a timer instead of
+reading a log.
+
+- SYN flood: many half-open connections (state SYN-RECV). Fires syn_flood when
+  the count passes syn_threshold. SYN sources are often spoofed, so this alerts
+  rather than blocks.
+- Slowloris: one IP holds many established connections open with almost no
+  traffic. Fires conn_hold when one IP's established count passes conn_threshold.
+  That IP is real, so it is blocked in enforce mode (allowlist still applies).
+
+Simulate from the attacker VM:
+
+    # SYN flood (short bursts), confirm with ss on the target:
+    sudo hping3 -S --flood -p 80 192.168.50.10
+    #   on target:  watch -n1 'ss -tan state syn-recv | wc -l'
+
+    # Slowloris:
+    sudo apt install -y slowhttptest
+    slowhttptest -c 300 -H -u http://192.168.50.10/ -i 10 -r 200
+    #   on target:  ss -tan state established | grep <attacker-ip> | wc -l
+
+Tune syn_threshold and conn_threshold above your normal connection counts.
+
 ## Rate-limiting as the flood response (day 10)
 
 In enforce mode, a single-source request flood is RATE-LIMITED, not hard-blocked:

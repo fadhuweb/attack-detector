@@ -36,6 +36,12 @@ DEFAULTS = {
     "req_threshold": 100,
     "req_cooldown": 30,
     "req_rate_limit": 20,   # in enforce, cap a flooding IP to this many req/sec
+    # connection-state rule (SYN flood + Slowloris)
+    "connstate_enabled": True,
+    "connstate_interval": 5,     # seconds between ss samples
+    "syn_threshold": 100,        # SYN-RECV half-open connections fires syn_flood
+    "conn_threshold": 50,        # established conns from ONE ip fires conn_hold
+    "connstate_cooldown": 30,    # seconds between repeat conn-state alerts
 }
 
 
@@ -65,6 +71,11 @@ class Config:
     req_threshold: int
     req_cooldown: int
     req_rate_limit: int
+    connstate_enabled: bool
+    connstate_interval: int
+    syn_threshold: int
+    conn_threshold: int
+    connstate_cooldown: int
 
 
 class ConfigError(Exception):
@@ -107,6 +118,11 @@ def load_config(path=None, overrides=None):
         req_threshold=int(data["req_threshold"]),
         req_cooldown=int(data["req_cooldown"]),
         req_rate_limit=int(data["req_rate_limit"]),
+        connstate_enabled=bool(data["connstate_enabled"]),
+        connstate_interval=int(data["connstate_interval"]),
+        syn_threshold=int(data["syn_threshold"]),
+        conn_threshold=int(data["conn_threshold"]),
+        connstate_cooldown=int(data["connstate_cooldown"]),
     )
     validate_config(cfg)
     return cfg

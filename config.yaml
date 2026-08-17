@@ -42,3 +42,11 @@ req_cooldown: 30        # seconds between per-IP flood alerts for the same IP
 req_rate_limit: 20      # in enforce, cap a flooding IP to this many req/sec
                         # (rate-limit, not a full block, so legit traffic
                         #  from a shared address still gets through)
+
+# connection-state rule (SYN flood + Slowloris) -- samples `ss`, not a log
+connstate_enabled: true
+connstate_interval: 5   # seconds between connection-table samples
+syn_threshold: 100      # half-open (SYN-RECV) connections fires a syn_flood alert
+conn_threshold: 50      # established connections from ONE ip fires conn_hold
+connstate_cooldown: 30  # seconds between repeat connection-state alerts
+                        # (slowloris); that IP is blocked in enforce mode
