@@ -88,6 +88,13 @@ class Controller:
             self.responder.unblock(ip)
             self._log(f"COMMAND unblock {ip}")
             return True, f"unblocked {ip}"
+        if action == "unlimit":
+            ip = cmd.get("ip")
+            if not ip:
+                return False, "unlimit requires an ip"
+            self.responder.unlimit(ip)
+            self._log(f"COMMAND unlimit {ip}")
+            return True, f"unlimited {ip}"
         if action == "block":
             ip = cmd.get("ip")
             if not ip:
@@ -141,6 +148,7 @@ class Controller:
             "mode": self.responder.mode,
             "uptime_seconds": round(time.time() - self._started_at, 1),
             "blocked": self.responder.blocked_ips(),
+            "limited": self.responder.limited_ips(),
             "allowlist": sorted(self.responder.allowlist),
             "threshold": self.detector.counter.threshold,
             "window_seconds": self.detector.counter.window,

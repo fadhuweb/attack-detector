@@ -35,6 +35,7 @@ DEFAULTS = {
     "req_window": 5,
     "req_threshold": 100,
     "req_cooldown": 30,
+    "req_rate_limit": 20,   # in enforce, cap a flooding IP to this many req/sec
 }
 
 
@@ -63,6 +64,7 @@ class Config:
     req_window: int
     req_threshold: int
     req_cooldown: int
+    req_rate_limit: int
 
 
 class ConfigError(Exception):
@@ -104,6 +106,7 @@ def load_config(path=None, overrides=None):
         req_window=int(data["req_window"]),
         req_threshold=int(data["req_threshold"]),
         req_cooldown=int(data["req_cooldown"]),
+        req_rate_limit=int(data["req_rate_limit"]),
     )
     validate_config(cfg)
     return cfg

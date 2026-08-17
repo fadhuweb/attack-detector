@@ -27,6 +27,7 @@ def _show_status(status_path):
     print(f"threshold: >{s.get('threshold')} in {s.get('window_seconds')}s")
     print(f"allowlist: {s.get('allowlist')}")
     print(f"blocked:   {s.get('blocked')}")
+    print(f"limited:   {s.get('limited')}")
     print(f"updated:   {s.get('updated')}")
 
 
@@ -45,6 +46,9 @@ def main(argv=None):
     u = sub.add_parser("unblock", help="release a blocked IP")
     u.add_argument("ip")
 
+    ul = sub.add_parser("unlimit", help="remove a rate-limit from an IP")
+    ul.add_argument("ip")
+
     b = sub.add_parser("block", help="manually block an IP (allowlist still applies)")
     b.add_argument("ip")
 
@@ -56,6 +60,8 @@ def main(argv=None):
         _write_mode(args.state, args.value)
     elif args.cmd == "unblock":
         _append_command(args.commands, {"action": "unblock", "ip": args.ip})
+    elif args.cmd == "unlimit":
+        _append_command(args.commands, {"action": "unlimit", "ip": args.ip})
     elif args.cmd == "block":
         _append_command(args.commands, {"action": "block", "ip": args.ip})
     elif args.cmd == "status":

@@ -39,3 +39,6 @@ flood_cooldown: 30      # seconds between flood alerts, so one flood alerts once
 req_window: 5           # seconds
 req_threshold: 100      # requests from ONE IP in the window fires
 req_cooldown: 30        # seconds between per-IP flood alerts for the same IP
+req_rate_limit: 20      # in enforce, cap a flooding IP to this many req/sec
+                        # (rate-limit, not a full block, so legit traffic
+                        #  from a shared address still gets through)

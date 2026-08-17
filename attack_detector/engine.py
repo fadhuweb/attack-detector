@@ -95,9 +95,12 @@ def main(argv=None):
     def on_reqrate(ip, count):
         alerter.fire("request_flood", ip, count,
                      "single-source request flood", responder.mode)
-        result = responder.handle_alert(ip, count, "single-source request flood")
-        if result == "skipped-allowlist":
-            _log(f"note: {ip} is allowlisted; alerted but not blocked")
+        result = responder.handle_flood(ip, count, "single-source request flood",
+                                        cfg.req_rate_limit)
+        if result == "limited":
+            _log(f"RATE-LIMIT {ip} to {cfg.req_rate_limit}/s (single-source flood)")
+        elif result == "skipped-allowlist":
+            _log(f"note: {ip} is allowlisted; alerted but not rate-limited")
 
     def on_flood(count, top_sources):
         top = ", ".join(f"{ip}({n})" for ip, n in top_sources)

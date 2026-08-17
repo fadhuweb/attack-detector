@@ -74,6 +74,21 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Rate-limiting as the flood response (day 10)
+
+In enforce mode, a single-source request flood is RATE-LIMITED, not hard-blocked:
+nftables caps the offending IP to req_rate_limit requests/second and drops the
+excess. This is gentler than a full block, so legitimate traffic from a shared
+address (many users behind one NAT) still gets through while the flood is
+throttled.
+
+- gated by mode and allowlist, exactly like blocking. The admin IP is never
+  rate-limited.
+- reversible live:  python3 -m attack_detector.ctl unlimit <ip>
+- a distributed flood has no single IP to limit, so it still only alerts.
+- rate-limits live in a separate nftables chain; remove all with the same
+  table flush:  sudo nft flush table inet attack_detector
+
 ## Distributed vs single-source floods (day 9)
 
 Two request-rate rules run on the access log:

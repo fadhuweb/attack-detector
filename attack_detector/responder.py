@@ -17,12 +17,22 @@ class BlockBackend:
     def list_blocked(self):
         raise NotImplementedError
 
+    def rate_limit(self, ip, rate_per_sec):
+        raise NotImplementedError
+
+    def unlimit(self, ip):
+        raise NotImplementedError
+
+    def list_limited(self):
+        raise NotImplementedError
+
 
 class MemoryBackend(BlockBackend):
     """In-memory backend for tests and dry runs. Records blocks, applies none."""
 
     def __init__(self):
         self._blocked = set()
+        self._limited = {}   # ip -> rate_per_sec
 
     def block(self, ip):
         self._blocked.add(ip)
@@ -32,6 +42,15 @@ class MemoryBackend(BlockBackend):
 
     def list_blocked(self):
         return sorted(self._blocked)
+
+    def rate_limit(self, ip, rate_per_sec):
+        self._limited[ip] = rate_per_sec
+
+    def unlimit(self, ip):
+        self._limited.pop(ip, None)
+
+    def list_limited(self):
+        return sorted(self._limited.items())
 
 
 class NftablesBackend(BlockBackend):
@@ -78,6 +97,7 @@ add table inet {self.TABLE}
 add set inet {self.TABLE} blocked4 {{ type ipv4_addr; flags interval; }}
 add set inet {self.TABLE} blocked6 {{ type ipv6_addr; flags interval; }}
 add chain inet {self.TABLE} input {{ type filter hook input priority -100; policy accept; }}
+add chain inet {self.TABLE} ratelimit {{ type filter hook input priority -90; policy accept; }}
 flush chain inet {self.TABLE} input
 add rule inet {self.TABLE} input ip saddr @blocked4 drop
 add rule inet {self.TABLE} input ip6 saddr @blocked6 drop
@@ -115,6 +135,36 @@ add rule inet {self.TABLE} input ip6 saddr @blocked6 drop
                         out.append(ip)
         return sorted(out)
 
+    def rate_limit(self, ip, rate_per_sec):
+        # drop packets from this ip that exceed rate_per_sec. A comment tag lets
+        # us find and remove the rule later by handle.
+        self._ensure_table()
+        fam = "ip" if self._family(ip) == 4 else "ip6"
+        self._run(["add", "rule", "inet", self.TABLE, "ratelimit",
+                   fam, "saddr", ip,
+                   "limit", "rate", "over", f"{rate_per_sec}/second", "drop",
+                   "comment", f'"adlimit:{ip}"'])
+
+    def unlimit(self, ip):
+        # find the rule handle carrying our comment tag, then delete by handle
+        res = self._run(["-a", "list", "chain", "inet", self.TABLE, "ratelimit"])
+        text = getattr(res, "stdout", "") or ""
+        for line in text.splitlines():
+            if f"adlimit:{ip}" in line and "handle" in line:
+                handle = line.rsplit("handle", 1)[1].strip().split()[0]
+                self._run(["delete", "rule", "inet", self.TABLE, "ratelimit",
+                           "handle", handle])
+
+    def list_limited(self):
+        res = self._run(["list", "chain", "inet", self.TABLE, "ratelimit"])
+        text = getattr(res, "stdout", "") or ""
+        out = []
+        for line in text.splitlines():
+            if "adlimit:" in line:
+                ip = line.split("adlimit:", 1)[1].split('"')[0]
+                out.append(ip)
+        return sorted(out)
+
 
 def make_backend(kind):
     if kind == "nftables":
@@ -144,6 +194,7 @@ class Responder:
         self.backend = backend
         self.log_path = log_path
         self._blocked = {}   # ip -> reason, what this process blocked
+        self._limited = {}   # ip -> rate, what this process rate-limited
 
     def _log(self, msg):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -177,6 +228,35 @@ class Responder:
         self._blocked[ip] = reason
         self._log(f"BLOCK src={ip} reason={reason} count={count}")
         return "blocked"
+
+    def handle_flood(self, ip, count, reason, rate_per_sec):
+        """Response to a single-source request flood: rate-limit rather than
+        hard-block, so legitimate traffic from a shared address still gets
+        through. Same mode and allowlist gates as blocking. Returns one of:
+        'limited', 'skipped-allowlist', 'skipped-monitor', 'noop-off',
+        'already-limited'."""
+        if self.mode == "off":
+            return "noop-off"
+        if self.mode == "monitor":
+            return "skipped-monitor"
+        if self.is_allowlisted(ip):
+            self._log(f"SKIP rate-limit src={ip} reason=allowlisted "
+                      f"(would have limited for {reason}, count={count})")
+            return "skipped-allowlist"
+        if ip in self._limited:
+            return "already-limited"
+        self.backend.rate_limit(ip, rate_per_sec)
+        self._limited[ip] = rate_per_sec
+        self._log(f"RATE-LIMIT src={ip} rate={rate_per_sec}/s reason={reason} count={count}")
+        return "limited"
+
+    def unlimit(self, ip):
+        self.backend.unlimit(ip)
+        self._limited.pop(ip, None)
+        self._log(f"UNLIMIT src={ip}")
+
+    def limited_ips(self):
+        return sorted(self._limited.keys())
 
     def unblock(self, ip):
         self.backend.unblock(ip)
