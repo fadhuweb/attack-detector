@@ -38,6 +38,8 @@ def create_app(status_path="status.json",
                alert_log="alerts.log",
                token=None,
                static_dir=None):
+    if static_dir is None:
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
     app = Flask(__name__, static_folder=static_dir, static_url_path="")
 
     def require_token(fn):
@@ -51,8 +53,25 @@ def create_app(status_path="status.json",
         return wrapper
 
     def _queue_command(cmd):
-        with open(control_commands, "a") as f:
-            f.write(json.dumps(cmd) + "\n")
+        try:
+            with open(control_commands, "a") as f:
+                f.write(json.dumps(cmd) + "\n")
+            return None
+        except OSError as e:
+            return e
+
+    def _write_state(mode):
+        try:
+            with open(control_state, "w") as f:
+                json.dump({"mode": mode}, f)
+            return None
+        except OSError as e:
+            return e
+
+    def _perm_hint(e):
+        return (f"cannot write control file: {e}. The engine and API must run as "
+                f"the same user (both under sudo, or both as the service user). "
+                f"This is fixed by the systemd install.")
 
     @app.get("/api/status")
     @require_token
@@ -75,8 +94,9 @@ def create_app(status_path="status.json",
         mode = body.get("mode")
         if mode not in ("off", "monitor", "enforce"):
             return jsonify({"error": "mode must be off, monitor, or enforce"}), 400
-        with open(control_state, "w") as f:
-            json.dump({"mode": mode}, f)
+        err = _write_state(mode)
+        if err is not None:
+            return jsonify({"error": _perm_hint(err)}), 500
         return jsonify({"ok": True, "requested_mode": mode})
 
     @app.post("/api/unblock")
@@ -86,7 +106,9 @@ def create_app(status_path="status.json",
         ip = body.get("ip")
         if not ip:
             return jsonify({"error": "ip required"}), 400
-        _queue_command({"action": "unblock", "ip": ip})
+        err = _queue_command({"action": "unblock", "ip": ip})
+        if err is not None:
+            return jsonify({"error": _perm_hint(err)}), 500
         return jsonify({"ok": True, "queued": {"unblock": ip}})
 
     @app.post("/api/unlimit")
@@ -96,7 +118,9 @@ def create_app(status_path="status.json",
         ip = body.get("ip")
         if not ip:
             return jsonify({"error": "ip required"}), 400
-        _queue_command({"action": "unlimit", "ip": ip})
+        err = _queue_command({"action": "unlimit", "ip": ip})
+        if err is not None:
+            return jsonify({"error": _perm_hint(err)}), 500
         return jsonify({"ok": True, "queued": {"unlimit": ip}})
 
     @app.post("/api/block")
@@ -106,12 +130,18 @@ def create_app(status_path="status.json",
         ip = body.get("ip")
         if not ip:
             return jsonify({"error": "ip required"}), 400
-        _queue_command({"action": "block", "ip": ip})
+        err = _queue_command({"action": "block", "ip": ip})
+        if err is not None:
+            return jsonify({"error": _perm_hint(err)}), 500
         return jsonify({"ok": True, "queued": {"block": ip}})
 
     @app.get("/api/health")
     def health():
         return jsonify({"ok": True})
+
+    @app.get("/")
+    def index():
+        return app.send_static_file("index.html")
 
     return app
 

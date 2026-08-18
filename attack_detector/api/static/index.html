@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attack-detector console</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --ink:#e6edf3;
+    --dim:#8b949e; --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --off:#6e7681; --monitor:#3b82f6; --enforce:#f0883e;
+    --ok:#3fb950; --warn:#f0883e; --bad:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--mono);font-size:14px;line-height:1.5}
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{margin:0;font-size:15px;font-weight:600;letter-spacing:.02em}
+  header h1 .dot{color:var(--ok)}
+  .meta{color:var(--dim);font-size:12px}
+  main{max-width:960px;margin:0 auto;padding:20px;display:grid;gap:16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+  .panel h2{margin:0 0 12px;font-size:12px;font-weight:600;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--dim)}
+  .mode-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .mode-now{font-size:22px;font-weight:700}
+  .mode-now[data-m="off"]{color:var(--off)}
+  .mode-now[data-m="monitor"]{color:var(--monitor)}
+  .mode-now[data-m="enforce"]{color:var(--enforce)}
+  .btns{display:flex;gap:8px;margin-left:auto}
+  button{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:6px;
+    border:1px solid var(--line);background:#21262d;color:var(--ink);cursor:pointer}
+  button:hover{border-color:var(--dim)}
+  button.active{border-color:currentColor;font-weight:700}
+  button[data-set="off"].active{color:var(--off)}
+  button[data-set="monitor"].active{color:var(--monitor)}
+  button[data-set="enforce"].active{color:var(--enforce)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse}
+  td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .empty{color:var(--dim);font-style:italic;padding:8px}
+  .rel{padding:3px 10px;font-size:12px}
+  .feed{max-height:320px;overflow:auto;font-size:12px;line-height:1.7}
+  .feed div{white-space:pre-wrap;word-break:break-word;padding:2px 0;border-bottom:1px solid #1b2028}
+  .feed .bruteforce{color:var(--warn)} .feed .flood{color:var(--bad)}
+  .feed .syn_flood{color:var(--bad)} .feed .request_flood{color:var(--warn)}
+  .feed .conn_hold{color:var(--bad)}
+  .stat{display:flex;gap:24px;flex-wrap:wrap;color:var(--dim);font-size:12px}
+  .stat b{color:var(--ink);font-weight:600}
+  .banner{padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;display:none}
+  .banner.show{display:block}
+  .banner.err{background:#3a1416;border:1px solid var(--bad);color:#ffb4ab}
+  .tokenbar{display:flex;gap:8px;align-items:center}
+  .tokenbar input{font-family:var(--mono);background:#0d1117;border:1px solid var(--line);
+    color:var(--ink);padding:6px 8px;border-radius:6px;font-size:12px;width:200px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">●</span> attack-detector console</h1>
+  <div class="meta" id="meta">connecting…</div>
+</header>
+<main>
+  <div id="banner" class="banner err"></div>
+
+  <div class="panel">
+    <h2>Mode</h2>
+    <div class="mode-row">
+      <span class="mode-now" id="modeNow" data-m="">—</span>
+      <div class="btns">
+        <button data-set="off">off</button>
+        <button data-set="monitor">monitor</button>
+        <button data-set="enforce">enforce</button>
+      </div>
+    </div>
+    <div class="stat" style="margin-top:12px">
+      <span>uptime <b id="uptime">—</b></span>
+      <span>brute-force threshold <b id="thr">—</b></span>
+      <span>allowlist <b id="allow">—</b></span>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Blocked</h2>
+      <table><tbody id="blocked"><tr><td class="empty">none</td></tr></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>Rate-limited</h2>
+      <table><tbody id="limited"><tr><td class="empty">none</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Recent alerts</h2>
+    <div class="feed" id="feed"><div class="empty">no alerts yet</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Access</h2>
+    <div class="tokenbar">
+      <span class="meta">API token</span>
+      <input id="token" type="password" placeholder="paste token if required">
+      <button id="saveTok">use</button>
+      <span class="meta" id="tokState"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let token = sessionStorage.getItem("ad_token") || "";
+$("#token").value = token;
+
+function headers(){ return token ? {"X-Auth-Token": token, "Content-Type":"application/json"}
+                                 : {"Content-Type":"application/json"}; }
+function showErr(msg){ const b=$("#banner"); b.textContent=msg; b.classList.add("show"); }
+function clearErr(){ $("#banner").classList.remove("show"); }
+
+async function api(path, opts){
+  const r = await fetch(path, Object.assign({headers:headers()}, opts||{}));
+  if(r.status===401){ showErr("unauthorized — set the API token below"); throw new Error("401"); }
+  return r;
+}
+
+async function refresh(){
+  try{
+    const r = await api("/api/status");
+    if(r.status===503){ $("#meta").textContent="engine not running"; return; }
+    const s = await r.json();
+    clearErr();
+    $("#meta").textContent = "updated " + (s.updated||"");
+    const m = s.mode||"";
+    $("#modeNow").textContent = m; $("#modeNow").dataset.m = m;
+    document.querySelectorAll("button[data-set]").forEach(b=>
+      b.classList.toggle("active", b.dataset.set===m));
+    $("#uptime").textContent = fmtUptime(s.uptime_seconds);
+    $("#thr").textContent = s.threshold!=null ? (">"+s.threshold+" in "+s.window_seconds+"s") : "—";
+    $("#allow").textContent = (s.allowlist||[]).join(", ") || "empty";
+    fillList("blocked", s.blocked, "unblock");
+    fillList("limited", s.limited, "unlimit");
+  }catch(e){ /* error already shown */ }
+  loadAlerts();
+}
+
+function fmtUptime(sec){
+  if(sec==null) return "—";
+  sec=Math.floor(sec); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+  return (h?h+"h ":"")+(m?m+"m ":"")+s+"s";
+}
+
+function fillList(id, items, action){
+  const tb=$("#"+id); items=items||[];
+  if(!items.length){ tb.innerHTML='<tr><td class="empty">none</td></tr>'; return; }
+  tb.innerHTML="";
+  items.forEach(it=>{
+    const ip = Array.isArray(it)? it[0] : it;
+    const tr=document.createElement("tr");
+    const td1=document.createElement("td"); td1.textContent=ip;
+    const td2=document.createElement("td"); td2.style.textAlign="right";
+    const btn=document.createElement("button"); btn.className="rel"; btn.textContent="release";
+    btn.onclick=()=>doAction(action, ip);
+    td2.appendChild(btn); tr.appendChild(td1); tr.appendChild(td2); tb.appendChild(tr);
+  });
+}
+
+async function loadAlerts(){
+  try{
+    const r = await api("/api/alerts?n=40"); const j = await r.json();
+    const feed=$("#feed"); const lines=(j.alerts||[]).slice().reverse();
+    if(!lines.length){ feed.innerHTML='<div class="empty">no alerts yet</div>'; return; }
+    feed.innerHTML="";
+    lines.forEach(ln=>{
+      const div=document.createElement("div");
+      const m=ln.match(/rule=(\w+)/); if(m) div.className=m[1];
+      div.textContent=ln; feed.appendChild(div);
+    });
+  }catch(e){}
+}
+
+async function setMode(m){
+  try{
+    const r = await api("/api/mode", {method:"POST", body:JSON.stringify({mode:m})});
+    const j = await r.json();
+    if(!r.ok){ showErr(j.error||"could not set mode"); return; }
+    clearErr(); refresh();
+  }catch(e){}
+}
+
+async function doAction(action, ip){
+  try{
+    const r = await api("/api/"+action, {method:"POST", body:JSON.stringify({ip})});
+    const j = await r.json();
+    if(!r.ok){ showErr(j.error||("could not "+action)); return; }
+    clearErr(); setTimeout(refresh, 400);
+  }catch(e){}
+}
+
+document.querySelectorAll("button[data-set]").forEach(b=>
+  b.onclick=()=>setMode(b.dataset.set));
+$("#saveTok").onclick=()=>{
+  token=$("#token").value.trim(); sessionStorage.setItem("ad_token", token);
+  $("#tokState").textContent = token? "saved" : "cleared"; refresh();
+};
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

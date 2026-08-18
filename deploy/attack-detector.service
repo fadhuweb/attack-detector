@@ -1,0 +1,19 @@
+[Unit]
+Description=attack-detector engine (detection + response)
+After=network.target nginx.service
+Wants=network.target
+
+[Service]
+Type=simple
+# runs as root: nft needs it, and running engine + api as the same identity
+# means they share ownership of the control files (no permission mismatch).
+User=root
+WorkingDirectory=/opt/attack-detector
+ExecStart=/usr/bin/python3 -m attack_detector.engine -c /etc/attack-detector/config.yaml
+Restart=on-failure
+RestartSec=3
+# write runtime files (control.json, status.json, alerts.log) under a fixed dir
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

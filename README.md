@@ -74,6 +74,33 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Install as a service (day 18)
+
+One-command install that runs the engine and dashboard as systemd services:
+
+    sudo bash deploy/install.sh
+
+It installs dependencies, lays the app in /opt/attack-detector, writes config to
+/etc/attack-detector/, generates an API token, and starts both services (engine
+and API) as root so they share the runtime files in /var/lib/attack-detector.
+This is what fixes the earlier permission mismatch from running them by hand.
+Full guide in deploy/INSTALL.md. Set admin_allowlist before using enforce.
+
+## Dashboard (day 17)
+
+The API serves a single-page dashboard at `/`. It shows the current mode with
+off/monitor/enforce buttons, the blocked and rate-limited lists with release
+buttons, and a live alert feed colour-coded by rule. It polls the API every 2s.
+
+Reach it (localhost only) over an SSH tunnel from your workstation:
+
+    # on your machine (Windows PowerShell or any ssh):
+    ssh -L 8787:127.0.0.1:8787 target@localhost -p 2222
+    # then open http://127.0.0.1:8787/ in your browser
+
+If the API requires a token, paste it into the Access box on the page. The page
+is static; every action it takes still goes through the token-guarded API.
+
 ## Control API (day 15)
 
 A small Flask API is the web front end over the same control files the ctl CLI

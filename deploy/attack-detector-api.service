@@ -1,0 +1,18 @@
+[Unit]
+Description=attack-detector API and dashboard
+After=attack-detector.service
+Wants=attack-detector.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/attack-detector
+# token is read from the environment file written by install.sh
+EnvironmentFile=/etc/attack-detector/api.env
+ExecStart=/usr/bin/python3 -m attack_detector.api.server -c /etc/attack-detector/config.yaml --host 127.0.0.1 --port ${AD_API_PORT} --token ${AD_API_TOKEN}
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
