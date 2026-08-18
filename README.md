@@ -74,6 +74,37 @@ blocking on the target (see below).
 5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
 6. Clean up:  sudo nft flush table inet attack_detector
 
+## Control API (day 15)
+
+A small Flask API is the web front end over the same control files the ctl CLI
+uses. It does not run detection; it reads status.json / alerts.log and writes
+control.json / commands.jsonl. Bind to localhost, require a token.
+
+Run it (alongside the engine):
+
+    AD_API_TOKEN=$(openssl rand -hex 16)   # pick a token
+    python3 -m attack_detector.api.server -c config.yaml --port 8787 --token "$AD_API_TOKEN"
+
+Endpoints (all except /api/health require X-Auth-Token when a token is set):
+
+    GET  /api/health                 -> {"ok": true}
+    GET  /api/status                 -> mode, blocked, limited, allowlist, thresholds
+    GET  /api/alerts?n=50            -> recent alert lines
+    POST /api/mode      {"mode": "..."}   -> off | monitor | enforce
+    POST /api/unblock   {"ip": "..."}
+    POST /api/unlimit   {"ip": "..."}
+    POST /api/block     {"ip": "..."}
+
+Example:
+
+    curl -H "X-Auth-Token: $AD_API_TOKEN" http://127.0.0.1:8787/api/status
+    curl -X POST -H "X-Auth-Token: $AD_API_TOKEN" -H "Content-Type: application/json" \
+         -d '{"mode":"enforce"}' http://127.0.0.1:8787/api/mode
+
+Security: the API controls the firewall, so keep it bound to 127.0.0.1 and reach
+it over an SSH tunnel. Never expose it on a public interface. The dashboard
+(day 17) is served from this same API.
+
 ## Connection-state rule: SYN flood and Slowloris (day 11)
 
 These attacks carry almost no request volume, so every log-based rule misses
