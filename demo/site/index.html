@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Freight — Employee Portal</title>
+<style>
+  :root{
+    --navy:#12263a; --sky:#2f6db3; --ice:#eef3f8;
+    --ink:#1a2b3c; --line:#d7e0ea; --ok:#2e7d5b; --paper:#ffffff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    color:var(--ink);background:var(--ice)}
+  header{background:var(--navy);color:#fff;padding:14px 28px;display:flex;
+    align-items:center;gap:12px}
+  header .logo{width:30px;height:30px;border-radius:6px;
+    background:linear-gradient(135deg,#4a9de0,#2f6db3);display:grid;place-items:center;
+    font-weight:800;color:#fff;font-size:15px}
+  header b{font-size:16px;letter-spacing:.02em}
+  header span{margin-left:auto;font-size:13px;opacity:.8}
+  .wrap{max-width:420px;margin:56px auto;padding:0 20px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:32px;box-shadow:0 6px 24px rgba(18,38,58,.06)}
+  h1{margin:0 0 4px;font-size:20px;color:var(--navy)}
+  .sub{color:#6a7c8d;font-size:14px;margin-bottom:22px}
+  label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px;color:#33475b}
+  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;
+    font-size:15px}
+  input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 3px rgba(47,109,179,.15)}
+  button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:8px;
+    background:var(--sky);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  button:hover{background:#2860a0}
+  .foot{text-align:center;color:#8496a6;font-size:12px;margin-top:20px}
+  .health{max-width:420px;margin:0 auto 40px;padding:0 20px}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#5a6b7b;
+    background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .pill .d{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">N</div>
+  <b>Northwind Freight</b>
+  <span>Employee Portal</span>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h1>Sign in</h1>
+    <div class="sub">Use your Northwind network credentials.</div>
+    <form onsubmit="event.preventDefault();fakeLogin()">
+      <label for="u">Username</label>
+      <input id="u" autocomplete="username" placeholder="j.rivera">
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password" placeholder="••••••••">
+      <button type="submit">Sign in</button>
+    </form>
+    <div class="foot">Northwind Freight Systems · internal use only</div>
+  </div>
+</div>
+
+<div class="health">
+  <span class="pill"><span class="d"></span> portal status: operational</span>
+</div>
+
+<script>
+function fakeLogin(){
+  // this is a demo portal; the login is illustrative. real auth attempts in the
+  // demo target SSH, which the detector watches.
+  const b = document.querySelector("button");
+  b.textContent = "Checking…";
+  setTimeout(()=>{ b.textContent="Invalid credentials"; b.style.background="#b5462f";
+    setTimeout(()=>{ b.textContent="Sign in"; b.style.background=""; }, 1400); }, 500);
+}
+</script>
+</body>
+</html>

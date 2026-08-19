@@ -38,7 +38,7 @@ DEFAULTS = {
     "req_rate_limit": 20,   # in enforce, cap a flooding IP to this many req/sec
     # connection-state rule (SYN flood + Slowloris)
     "connstate_enabled": True,
-    "connstate_interval": 5,     # seconds between ss samples
+    "connstate_interval": 2,     # seconds between ss samples
     "syn_threshold": 100,        # SYN-RECV half-open connections fires syn_flood
     "conn_threshold": 50,        # established conns from ONE ip fires conn_hold
     "connstate_cooldown": 30,    # seconds between repeat conn-state alerts

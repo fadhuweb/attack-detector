@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attack-detector — live demo</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --ink:#e6edf3; --dim:#8b949e;
+    --mono:"SFMono-Regular",Consolas,Menlo,monospace;
+    --ok:#3fb950; --degraded:#f0883e; --down:#f85149; --sky:#2f6db3;
+    --off:#6e7681; --monitor:#3b82f6; --enforce:#f0883e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:12px}
+  header h1{margin:0;font-size:15px;font-weight:600}
+  header .sub{color:var(--dim);font-size:12px;margin-left:auto}
+  main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:16px;
+    grid-template-columns:1fr 1fr}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .full{grid-column:1 / -1}
+  h2{margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+  .verdict{font-size:26px;font-weight:800}
+  .verdict[data-v="operational"]{color:var(--ok)}
+  .verdict[data-v="degraded"]{color:var(--degraded)}
+  .verdict[data-v="down"]{color:var(--down)}
+  .verdict[data-v="unknown"]{color:var(--dim)}
+  .metric{color:var(--dim);font-size:13px;margin-top:6px}
+  .metric b{color:var(--ink)}
+  canvas{width:100%;height:120px;margin-top:12px;background:#0b0f14;border:1px solid var(--line);border-radius:6px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  button{font-family:var(--mono);font-size:13px;padding:9px 14px;border-radius:6px;
+    border:1px solid var(--line);background:#21262d;color:var(--ink);cursor:pointer}
+  button:hover{border-color:var(--dim)}
+  .atk{border-color:#5a2b24;color:#ffb4ab}
+  .atk:hover{border-color:var(--down)}
+  .stop{border-color:#2d3b2f}
+  .mode button.active[data-set="off"]{color:var(--off);border-color:currentColor;font-weight:700}
+  .mode button.active[data-set="monitor"]{color:var(--monitor);border-color:currentColor;font-weight:700}
+  .mode button.active[data-set="enforce"]{color:var(--enforce);border-color:currentColor;font-weight:700}
+  .now{font-size:20px;font-weight:700;margin-bottom:10px}
+  .now[data-m="off"]{color:var(--off)} .now[data-m="monitor"]{color:var(--monitor)}
+  .now[data-m="enforce"]{color:var(--enforce)}
+  .feed{max-height:200px;overflow:auto;font-size:12px;line-height:1.7}
+  .feed div{padding:2px 0;border-bottom:1px solid #1b2028;white-space:pre-wrap;word-break:break-word}
+  .feed .bruteforce,.feed .request_flood{color:var(--degraded)}
+  .feed .flood,.feed .syn_flood,.feed .conn_hold{color:var(--down)}
+  .status-line{font-size:12px;color:var(--dim);margin-top:8px}
+  .cfg{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+  .cfg input{font-family:var(--mono);background:#0b0f14;border:1px solid var(--line);color:var(--ink);
+    padding:6px 8px;border-radius:6px;font-size:12px}
+  .running{color:var(--down);font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>attack-detector · live demo</h1>
+  <span class="sub">Northwind portal (192.168.50.10) vs the detector</span>
+</header>
+<div id="connstrip" style="max-width:1100px;margin:8px auto 0;padding:0 20px;
+    font-size:12px;color:#8b949e;display:flex;gap:16px;flex-wrap:wrap">
+    <span>probe <b id="cs-probe">…</b></span>
+    <span>launcher <b id="cs-launch">…</b></span>
+    <span>detector <b id="cs-api">…</b></span>
+  </div>
+<main>
+  <!-- TOP: the actual website the viewer is protecting -->
+  <div class="panel full">
+    <h2>The website (Northwind portal · live)</h2>
+    <div style="position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff">
+      <iframe id="portal" style="width:100%;height:340px;border:0;display:block"></iframe>
+      <div id="portalOverlay" style="position:absolute;inset:0;display:none;
+        align-items:center;justify-content:center;background:rgba(13,17,23,.82);
+        color:#f0883e;font-size:15px;font-weight:700">site not responding…</div>
+    </div>
+    <div class="status-line" id="portalState">loading…</div>
+  </div>
+
+  <!-- LEFT: the victim site's health -->
+  <div class="panel">
+    <h2>Target site health</h2>
+    <div class="verdict" id="verdict" data-v="unknown">—</div>
+    <div class="metric">response time <b id="ms">—</b> · <span id="up">—</span> up in last 10</div>
+    <canvas id="chart" width="520" height="120"></canvas>
+    <div class="status-line" id="attackState">no attack running</div>
+  </div>
+
+  <!-- RIGHT: the detector -->
+  <div class="panel mode">
+    <h2>Detector</h2>
+    <div class="now" id="modeNow" data-m="">—</div>
+    <div class="btns">
+      <button data-set="off">off</button>
+      <button data-set="monitor">monitor</button>
+      <button data-set="enforce">enforce</button>
+    </div>
+    <div class="status-line">blocked <b id="blocked">—</b> · limited <b id="limited">—</b></div>
+    <h2 style="margin-top:16px">Recent alerts</h2>
+    <div class="feed" id="feed"><div class="metric">none yet</div></div>
+  </div>
+
+  <!-- BOTTOM: attack controls -->
+  <div class="panel full">
+    <h2>Launch attack (auto-stops after 30s)</h2>
+    <div class="btns">
+      <button class="atk" data-atk="bruteforce">brute force (SSH)</button>
+      <button class="atk" data-atk="request_flood">request flood (HTTP)</button>
+      <button class="atk" data-atk="conn_flood">connection flood (Slowloris)</button>
+      <button class="stop" id="stopBtn">stop</button>
+    </div>
+  </div>
+
+  <!-- config -->
+  <div class="panel full">
+    <h2>Connections</h2>
+    <div class="cfg">
+      <span>probe</span><input id="probeUrl" size="34">
+      <span>launcher</span><input id="launchUrl" size="34">
+      <span>portal</span><input id="portalUrl" size="30">
+      <span>detector API</span><input id="apiUrl" size="34">
+      <span>API token</span><input id="apiTok" type="password" size="18">
+      <span>launcher token</span><input id="launchTok" type="password" size="18">
+      <button id="saveCfg">save</button>
+    </div>
+    <div class="status-line" id="cfgState"></div>
+  </div>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const cfg = JSON.parse(localStorage.getItem("ad_demo_cfg")||"{}");
+const D = Object.assign({
+  probe:"http://127.0.0.1:8080/health",
+  launch:"http://127.0.0.1:8090",
+  api:"http://127.0.0.1:8787/api",
+  portal:"http://127.0.0.1:8088/",
+  apiTok:"", launchTok:"pickatoken"
+}, cfg);
+$("#probeUrl").value=D.probe; $("#launchUrl").value=D.launch; $("#apiUrl").value=D.api; if($("#portalUrl")) $("#portalUrl").value=D.portal;
+$("#apiTok").value=D.apiTok; $("#launchTok").value=D.launchTok;
+
+$("#saveCfg").onclick=()=>{
+  D.probe=$("#probeUrl").value.trim(); D.launch=$("#launchUrl").value.trim();
+  D.api=$("#apiUrl").value.trim(); D.portal=$("#portalUrl").value.trim(); portalUrl=D.portal; $("#portal").src=D.portal; D.apiTok=$("#apiTok").value.trim();
+  D.launchTok=$("#launchTok").value.trim();
+  localStorage.setItem("ad_demo_cfg", JSON.stringify(D));
+  $("#cfgState").textContent="saved";
+};
+
+// ---- health polling + chart ----
+const ctx=$("#chart").getContext("2d");
+function drawChart(series){
+  const w=$("#chart").width, h=$("#chart").height;
+  ctx.clearRect(0,0,w,h);
+  if(!series||!series.length) return;
+  const ms=series.map(r=>r.up? r.ms : 300);
+  const max=Math.max(60, Math.max(...ms));
+  // threshold line at ~30ms (visual "healthy" band)
+  ctx.strokeStyle="#233"; ctx.beginPath();
+  const yb=h-(30/max)*h; ctx.moveTo(0,yb); ctx.lineTo(w,yb); ctx.stroke();
+  ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle="#3fb950";
+  series.forEach((r,i)=>{
+    const x=(i/(series.length-1))*w;
+    const v=r.up? r.ms:max;
+    const y=h-(v/max)*h;
+    if(!r.up){ ctx.strokeStyle="#f85149"; }
+    i? ctx.lineTo(x,y):ctx.moveTo(x,y);
+  });
+  ctx.stroke();
+}
+async function pollHealth(){
+  try{
+    const r=await fetch(D.probe,{cache:"no-store"}); const s=await r.json();
+    setCS("cs-probe", true);
+    $("#verdict").textContent=s.verdict; $("#verdict").dataset.v=s.verdict;
+    $("#ms").textContent=(s.avg_ms!=null? s.avg_ms+" ms":"—");
+    $("#up").textContent=(s.up_last10!=null? s.up_last10:"—");
+    drawChart(s.series);
+  }catch(e){ setCS("cs-probe", false); $("#verdict").textContent="probe offline"; $("#verdict").dataset.v="unknown"; }
+}
+// ---- attack status ----
+async function setCS(id, ok){ const el=document.getElementById(id); if(!el) return;
+  el.textContent = ok? "connected" : "offline";
+  el.style.color = ok? "#3fb950" : "#f85149"; }
+async function pollAttack(){
+  try{
+    const r=await fetch(D.launch+"/status",{cache:"no-store"}); const s=await r.json();
+    const el=$("#attackState");
+    setCS("cs-launch", true);
+    if(s.running){ el.innerHTML='<span class="running">ATTACK: '+s.kind+'</span> · '+
+      Math.round(s.elapsed)+'s / '+s.max_seconds+'s'; }
+    else el.textContent="no attack running";
+  }catch(e){ setCS("cs-launch", false); $("#attackState").textContent="launcher offline"; }
+}
+async function launch(kind){
+  try{
+    await fetch(D.launch+"/start",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Auth-Token":D.launchTok},
+      body:JSON.stringify({kind})});
+    pollAttack();
+  }catch(e){}
+}
+async function stopAttack(){
+  try{ await fetch(D.launch+"/stop",{method:"POST",
+    headers:{"X-Auth-Token":D.launchTok}}); pollAttack(); }catch(e){}
+}
+// ---- detector status + mode ----
+async function pollDetector(){
+  try{
+    const r=await fetch(D.api+"/status",{headers:{"X-Auth-Token":D.apiTok}});
+    if(!r.ok) throw 0;
+    const s=await r.json();
+    setCS("cs-api", true);
+    $("#modeNow").textContent=s.mode; $("#modeNow").dataset.m=s.mode;
+    document.querySelectorAll(".mode button[data-set]").forEach(b=>
+      b.classList.toggle("active", b.dataset.set===s.mode));
+    $("#blocked").textContent=(s.blocked||[]).length;
+    $("#limited").textContent=(s.limited||[]).length;
+  }catch(e){ setCS("cs-api", false); $("#modeNow").textContent="api offline"; }
+  try{
+    const r=await fetch(D.api+"/alerts?n=15",{headers:{"X-Auth-Token":D.apiTok}});
+    const j=await r.json(); const feed=$("#feed");
+    const lines=(j.alerts||[]).slice().reverse();
+    if(!lines.length){ feed.innerHTML='<div class="metric">none yet</div>'; }
+    else{ feed.innerHTML=""; lines.forEach(ln=>{const d=document.createElement("div");
+      const m=ln.match(/rule=(\w+)/); if(m)d.className=m[1]; d.textContent=ln; feed.appendChild(d);}); }
+  }catch(e){}
+}
+async function setMode(m){
+  try{ await fetch(D.api+"/mode",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Auth-Token":D.apiTok},
+    body:JSON.stringify({mode:m})}); pollDetector(); }catch(e){}
+}
+document.querySelectorAll(".atk").forEach(b=>b.onclick=()=>launch(b.dataset.atk));
+$("#stopBtn").onclick=stopAttack;
+document.querySelectorAll(".mode button[data-set]").forEach(b=>b.onclick=()=>setMode(b.dataset.set));
+
+let portalUrl = D.portal;
+$("#portalUrl") && ($("#portalUrl").value = portalUrl);
+
+async function pollPortal(){
+  const frame = $("#portal"), overlay = $("#portalOverlay"), st = $("#portalState");
+  const t0 = performance.now();
+  try{
+    // HEAD-ish fetch to measure reachability; no-cors so we don't read it, just time it
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), 2500);
+    await fetch(portalUrl, {mode:"no-cors", cache:"no-store", signal:ctrl.signal});
+    clearTimeout(to);
+    const ms = Math.round(performance.now()-t0);
+    if(ms > 1200){
+      overlay.querySelector ? null : null;
+      overlay.textContent = "site struggling — " + ms + " ms to respond";
+      overlay.style.display = "flex";
+      st.textContent = "portal SLOW: " + ms + " ms";
+      st.style.color = "#f0883e";
+    } else {
+      overlay.style.display = "none";
+      st.textContent = "portal responded in " + ms + " ms";
+      st.style.color = ms > 500 ? "#f0883e" : "#8b949e";
+    }
+    // (re)load the iframe only occasionally to show it live without flicker
+    if(!frame.src || frame.dataset.stamp && (Date.now()-frame.dataset.stamp>4000)){
+      frame.src = portalUrl; frame.dataset.stamp = Date.now();
+    }
+  }catch(e){
+    overlay.textContent = "site not responding";
+    overlay.style.display = "flex";
+    st.textContent = "portal DOWN (attack in progress)";
+    st.style.color = "#f85149";
+  }
+}
+
+function tick(){ pollHealth(); pollAttack(); pollDetector(); pollPortal(); }
+tick(); setInterval(tick, 1500);
+</script>
+</body>
+</html>

@@ -224,6 +224,12 @@ class Responder:
             return "skipped-allowlist"
         if ip in self._blocked:
             return "already-blocked"
+        # if this IP was rate-limited (e.g. a flood rule fired first), a block
+        # supersedes the limit: remove the rate-limit rule, then block.
+        if ip in self._limited:
+            self.backend.unlimit(ip)
+            self._limited.pop(ip, None)
+            self._log(f"supersede rate-limit with block src={ip}")
         self.backend.block(ip)
         self._blocked[ip] = reason
         self._log(f"BLOCK src={ip} reason={reason} count={count}")
@@ -243,6 +249,8 @@ class Responder:
             self._log(f"SKIP rate-limit src={ip} reason=allowlisted "
                       f"(would have limited for {reason}, count={count})")
             return "skipped-allowlist"
+        if ip in self._blocked:
+            return "already-blocked"   # block already covers this IP
         if ip in self._limited:
             return "already-limited"
         self.backend.rate_limit(ip, rate_per_sec)

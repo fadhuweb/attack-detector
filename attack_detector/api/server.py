@@ -42,6 +42,13 @@ def create_app(status_path="status.json",
         static_dir = os.path.join(os.path.dirname(__file__), "static")
     app = Flask(__name__, static_folder=static_dir, static_url_path="")
 
+    @app.after_request
+    def _cors(resp):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "X-Auth-Token, Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        return resp
+
     def require_token(fn):
         @wraps(fn)
         def wrapper(*a, **k):
@@ -134,6 +141,10 @@ def create_app(status_path="status.json",
         if err is not None:
             return jsonify({"error": _perm_hint(err)}), 500
         return jsonify({"ok": True, "queued": {"block": ip}})
+
+    @app.route("/api/<path:_any>", methods=["OPTIONS"])
+    def _preflight(_any):
+        return ("", 204)
 
     @app.get("/api/health")
     def health():

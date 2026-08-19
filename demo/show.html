@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Freight</title>
+<style>
+  :root{
+    --ink:#12263a; --sky:#2f6db3; --ok:#2e7d5b; --bad:#b5462f; --line:#d7e0ea;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:#eef3f8;color:var(--ink)}
+  .bar{background:#12263a;color:#fff;padding:16px 22px;display:flex;align-items:center;gap:14px}
+  .bar .logo{width:34px;height:34px;border-radius:7px;background:linear-gradient(135deg,#4a9de0,#2f6db3);
+    display:grid;place-items:center;font-weight:800;font-size:17px}
+  .bar b{font-size:18px}
+  .state{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+  .state .dot{width:11px;height:11px;border-radius:50%}
+  .state.up .dot{background:#3fb950} .state.up{color:#8fe6ad}
+  .state.down .dot{background:#f85149} .state.down{color:#ffb4ab}
+  .sitewrap{position:relative;margin:22px auto;max-width:900px;padding:0 16px}
+  .frame{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    background:#fff;box-shadow:0 8px 30px rgba(18,38,58,.08);min-height:440px}
+  iframe{width:100%;height:440px;border:0;display:block}
+  .overlay{position:absolute;inset:0;display:none;flex-direction:column;gap:10px;
+    align-items:center;justify-content:center;background:rgba(18,38,58,.9);color:#fff;text-align:center;padding:20px}
+  .overlay.show{display:flex}
+  .overlay .big{font-size:26px;font-weight:800;color:#ff8a75}
+  .overlay .sub{font-size:15px;opacity:.85}
+  .controls{max-width:900px;margin:0 auto 40px;padding:0 16px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-top:16px}
+  .panel h2{margin:0 0 12px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6a7c8d}
+  .btns{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{font-family:inherit;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;
+    border:1px solid var(--line);background:#f6f9fc;color:var(--ink);cursor:pointer;flex:1;min-width:150px}
+  .btn.attack{background:#fff2ee;border-color:#f0c4b6;color:#a33a22}
+  .btn.attack:active{transform:scale(.98)}
+  .btn.stop{background:#eef3f8}
+  .modes{display:flex;gap:10px;margin-top:6px}
+  .modes .btn{flex:1}
+  .modes .btn.active[data-set="monitor"]{background:#e7f0fb;border-color:#2f6db3;color:#1d4b7f}
+  .modes .btn.active[data-set="enforce"]{background:#eaf7ef;border-color:#2e7d5b;color:#1f5a41}
+  .modes .btn.active[data-set="off"]{background:#eef1f4;border-color:#6e7681;color:#3a4653}
+  .now{font-size:14px;color:#6a7c8d;margin-bottom:10px}
+  .now b{color:var(--ink)}
+  .att{font-size:13px;color:#a33a22;font-weight:600;margin-top:10px;min-height:18px}
+  .setup{max-width:900px;margin:0 auto 40px;padding:0 16px}
+  .setup details{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;color:#6a7c8d;font-size:13px}
+  .setup input{font-family:monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin:3px}
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="logo">N</div>
+  <b>Northwind Freight</b>
+  <div class="state" id="state"><span class="dot"></span><span id="stateText">checking…</span></div>
+</div>
+
+<div class="sitewrap">
+  <div class="frame">
+    <iframe id="site"></iframe>
+    <div class="overlay" id="overlay">
+      <div class="big" id="overlayBig">Site not responding</div>
+      <div class="sub" id="overlaySub">The server is under attack and cannot be reached.</div>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="panel">
+    <h2>Attack</h2>
+    <div class="btns">
+      <button class="btn attack" data-atk="bruteforce">Brute force</button>
+      <button class="btn attack" data-atk="app_flood">Denial of service · traffic flood</button>
+      <button class="btn attack" data-atk="app_conn_exhaust">Denial of service · connection exhaustion</button>
+      <button class="btn stop" id="stop">Stop</button>
+    </div>
+    <div class="att" id="attState"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Defense</h2>
+    <div class="now">detector is <b id="modeNow">—</b></div>
+    <div class="modes">
+      <button class="btn" data-set="off">Off</button>
+      <button class="btn" data-set="monitor">Monitor (watch only)</button>
+      <button class="btn" data-set="enforce">Enforce (block attacks)</button>
+    </div>
+  </div>
+</div>
+
+<div class="setup">
+  <details>
+    <summary>Setup (hidden from audience)</summary>
+    <div>
+      site <input id="cfgSite" size="30">
+      appstate <input id="cfgApp" size="30"><br>
+      launcher <input id="cfgLaunch" size="26">
+      launcher token <input id="cfgLtok" size="16"><br>
+      detector API <input id="cfgApi" size="26">
+      API token <input id="cfgAtok" size="16">
+      <button onclick="saveCfg()">save</button>
+    </div>
+  </details>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const cfg=Object.assign({
+  site:"http://127.0.0.1:8000/",
+  app:"http://127.0.0.1:8000/appstate",
+  launch:"http://127.0.0.1:8090",
+  ltok:"pickatoken",
+  api:"http://127.0.0.1:8787/api",
+  atok:""
+}, JSON.parse(localStorage.getItem("ad_show_cfg")||"{}"));
+$("#cfgSite").value=cfg.site; $("#cfgApp").value=cfg.app; $("#cfgLaunch").value=cfg.launch;
+$("#cfgLtok").value=cfg.ltok; $("#cfgApi").value=cfg.api; $("#cfgAtok").value=cfg.atok;
+function saveCfg(){
+  cfg.site=$("#cfgSite").value.trim(); cfg.app=$("#cfgApp").value.trim();
+  cfg.launch=$("#cfgLaunch").value.trim(); cfg.ltok=$("#cfgLtok").value.trim();
+  cfg.api=$("#cfgApi").value.trim(); cfg.atok=$("#cfgAtok").value.trim();
+  localStorage.setItem("ad_show_cfg", JSON.stringify(cfg));
+  $("#site").src=cfg.site;
+}
+$("#site").src=cfg.site;
+
+let downStreak=0;
+async function checkSite(){
+  const state=$("#state"), txt=$("#stateText"), ov=$("#overlay");
+  try{
+    const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),2000);
+    const r=await fetch(cfg.app,{cache:"no-store",signal:ctrl.signal});
+    clearTimeout(to); const j=await r.json();
+    if(j.healthy){ downStreak=0; state.className="state up"; txt.textContent="Online";
+      ov.classList.remove("show"); }
+    else { downStreak++; markDown("Overloaded","Too many connections — the server is refusing new visitors."); }
+  }catch(e){ downStreak++; markDown("Site not responding","The server is under attack and cannot be reached."); }
+}
+function markDown(big,sub){
+  // require 2 consecutive bad checks so a blip doesn't flash the overlay
+  if(downStreak<2) return;
+  $("#state").className="state down"; $("#stateText").textContent="Down";
+  $("#overlayBig").textContent=big; $("#overlaySub").textContent=sub;
+  $("#overlay").classList.add("show");
+}
+
+async function pollAttack(){
+  try{
+    const r=await fetch(cfg.launch+"/status",{cache:"no-store"}); const s=await r.json();
+    $("#attState").textContent = s.running ? ("Attacking: "+s.kind+"  ("+Math.round(s.elapsed)+"s / "+s.max_seconds+"s)") : "";
+  }catch(e){}
+}
+async function launch(kind){
+  try{ await fetch(cfg.launch+"/start",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Auth-Token":cfg.ltok},
+    body:JSON.stringify({kind})}); pollAttack(); }catch(e){}
+}
+async function stopAtk(){ try{ await fetch(cfg.launch+"/stop",{method:"POST",
+  headers:{"X-Auth-Token":cfg.ltok}}); pollAttack(); }catch(e){} }
+
+async function pollMode(){
+  try{
+    const r=await fetch(cfg.api+"/status",{headers:{"X-Auth-Token":cfg.atok}});
+    const s=await r.json(); $("#modeNow").textContent=s.mode;
+    document.querySelectorAll(".modes .btn").forEach(b=>b.classList.toggle("active",b.dataset.set===s.mode));
+  }catch(e){ $("#modeNow").textContent="(offline)"; }
+}
+async function setMode(m){ try{ await fetch(cfg.api+"/mode",{method:"POST",
+  headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+  body:JSON.stringify({mode:m})}); pollMode(); }catch(e){} }
+
+document.querySelectorAll(".btn.attack").forEach(b=>b.onclick=()=>launch(b.dataset.atk));
+$("#stop").onclick=stopAtk;
+document.querySelectorAll(".modes .btn").forEach(b=>b.onclick=()=>setMode(b.dataset.set));
+
+function tick(){ checkSite(); pollAttack(); pollMode(); }
+tick(); setInterval(tick, 1200);
+</script>
+</body>
+</html>

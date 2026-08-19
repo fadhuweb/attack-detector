@@ -100,6 +100,18 @@ check("table is named attack_detector and hooks input at priority -100",
       "table inet attack_detector" in script and "priority -100" in script
       and "saddr @blocked4 drop" in script)
 
+
+# ---- block supersedes an existing rate-limit (slowloris that first tripped flood) ----
+from attack_detector.responder import Responder, MemoryBackend
+b = MemoryBackend()
+r = Responder("enforce", allowlist=["10.0.2.2"], backend=b, log_path="/tmp/sup.log")
+r.handle_flood("203.0.113.9", 100, "request flood", 20)
+assert "203.0.113.9" in r.limited_ips(), "should be limited first"
+res = r.handle_alert("203.0.113.9", 70, "connection-holding (slowloris)")
+check("block supersedes rate-limit: result is blocked", res == "blocked")
+check("superseded IP no longer in limited list", "203.0.113.9" not in r.limited_ips())
+check("superseded IP now in blocked list", "203.0.113.9" in r.blocked_ips())
+
 print()
 if _fail:
     print(f"{len(_fail)} check(s) failed")
