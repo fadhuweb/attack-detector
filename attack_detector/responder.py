@@ -115,6 +115,21 @@ add rule inet {self.TABLE} input ip6 saddr @blocked6 drop
         setname = "blocked6" if self._family(ip) == 6 else "blocked4"
         # `add element` is idempotent: re-adding an existing element is a no-op
         self._run(["add", "element", "inet", self.TABLE, setname, "{" + ip + "}"])
+        # blocking new packets is not enough: connections the attacker already
+        # established stay open and keep holding server workers/slots. Kill them
+        # so a block frees the resource immediately (this is what lets a blocked
+        # slowloris release the app instead of keeping it down until TCP timeout).
+        self._kill_connections(ip)
+
+    def _kill_connections(self, ip):
+        try:
+            # ss can tear down existing sockets to/from an address
+            subprocess.run(["ss", "--kill", "dst", ip],
+                           capture_output=True, text=True, timeout=3)
+            subprocess.run(["ss", "--kill", "src", ip],
+                           capture_output=True, text=True, timeout=3)
+        except Exception:
+            pass
 
     def unblock(self, ip):
         setname = "blocked6" if self._family(ip) == 6 else "blocked4"

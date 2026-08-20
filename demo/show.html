@@ -74,6 +74,7 @@
       <button class="btn attack" data-atk="app_flood">Denial of service · traffic flood</button>
       <button class="btn attack" data-atk="app_conn_exhaust">Denial of service · connection exhaustion</button>
       <button class="btn stop" id="stop">Stop</button>
+      <button class="btn stop" id="reset">Reset (unblock)</button>
     </div>
     <div class="att" id="attState"></div>
   </div>
@@ -112,7 +113,8 @@ const cfg=Object.assign({
   launch:"http://127.0.0.1:8090",
   ltok:"pickatoken",
   api:"http://127.0.0.1:8787/api",
-  atok:""
+  atok:"",
+  attacker:"192.168.50.11"
 }, JSON.parse(localStorage.getItem("ad_show_cfg")||"{}"));
 $("#cfgSite").value=cfg.site; $("#cfgApp").value=cfg.app; $("#cfgLaunch").value=cfg.launch;
 $("#cfgLtok").value=cfg.ltok; $("#cfgApi").value=cfg.api; $("#cfgAtok").value=cfg.atok;
@@ -172,6 +174,19 @@ async function setMode(m){ try{ await fetch(cfg.api+"/mode",{method:"POST",
 
 document.querySelectorAll(".btn.attack").forEach(b=>b.onclick=()=>launch(b.dataset.atk));
 $("#stop").onclick=stopAtk;
+$("#reset").onclick=async ()=>{
+  try{ await stopAtk(); }catch(e){}
+  try{
+    await fetch(cfg.api+"/unblock",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+      body:JSON.stringify({ip:cfg.attacker})});
+    await fetch(cfg.api+"/unlimit",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+      body:JSON.stringify({ip:cfg.attacker})});
+    $("#attState").textContent="reset: attacker unblocked";
+    setTimeout(()=>{$("#attState").textContent="";}, 2500);
+  }catch(e){ $("#attState").textContent="reset failed (check detector connection)"; }
+};
 document.querySelectorAll(".modes .btn").forEach(b=>b.onclick=()=>setMode(b.dataset.set));
 
 function tick(){ checkSite(); pollAttack(); pollMode(); }

@@ -1,136 +1,129 @@
 #!/usr/bin/env python3
-"""A deliberately fragile 'Northwind app' server for the demo.
+"""Deliberately fragile 'Northwind app' server for the demo.
 
-Unlike nginx, this is easy to overwhelm: a small thread pool and a shallow
-listen backlog. Under a connection-exhaustion (Slowloris) or traffic flood it
-runs out of workers and stops answering new requests -- it goes DOWN for real,
-no artificial cap needed. When the attacker is blocked (enforce mode), the held
-connections die, workers free up, and it answers again.
+Design goal: a held-open connection DETERMINISTICALLY occupies one worker. The
+server has a fixed worker pool. Each worker, once it accepts a connection, reads
+the HTTP request until the blank line that ends the headers. A Slowloris client
+that sends partial headers and never sends that blank line keeps its worker
+blocked until the socket read times out. So:
 
-It also exposes /appstate so the demo page can show 'online' vs 'not responding'
-without a chart.
+    connections held  ==  workers busy
 
-Run on the TARGET (behind nothing; it IS the victim app):
-    python3 demo/app/fragile_server.py --port 8000 --workers 8
+which makes the crash predictable: N slow connections against N workers saturates
+the pool, and /appstate reports unhealthy (or the app stops answering).
+
+/appstate is answered on a FAST path that does not consume a pool worker, so the
+health check still works right up until saturation and reports it honestly.
 """
 import argparse
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn, TCPServer
 
-PORTAL_HTML = None  # loaded from file at start
+PORTAL_HTML = b"<!doctype html><h1>Northwind App</h1><p>online</p>"
+STATE_LOCK = threading.Lock()
+BUSY = 0
+TOTAL = 8
+READ_TIMEOUT = 20     # a held connection occupies its worker up to this long
 
 
-class BoundedThreadingServer(ThreadingMixIn, TCPServer):
-    """A server with a HARD cap on concurrent worker threads and a shallow
-    backlog, so it can actually be exhausted. Standard ThreadingHTTPServer
-    spawns unlimited threads and is very hard to take down; this one won't."""
-    daemon_threads = True
-    allow_reuse_address = True
-    request_queue_size = 5          # shallow listen backlog
-
-    def __init__(self, addr, handler, max_workers=8):
-        super().__init__(addr, handler)
-        self._sem = threading.BoundedSemaphore(max_workers)
-        self._active = 0
-        self._active_lock = threading.Lock()
-        self.max_workers = max_workers
-
-    def process_request(self, request, client_address):
-        # if no worker slot is free, DO NOT spawn; refuse by closing. This is
-        # what makes the app "go down" under load instead of scaling forever.
-        got = self._sem.acquire(blocking=False)
-        if not got:
-            try:
-                request.close()
-            except Exception:
-                pass
+def handle_conn(conn):
+    """A worker: read the full request (headers up to blank line), then respond.
+    A slowloris never sends the blank line, so this blocks until timeout, holding
+    the worker the whole time. That is the point."""
+    global BUSY
+    with STATE_LOCK:
+        BUSY += 1
+    try:
+        conn.settimeout(READ_TIMEOUT)
+        data = b""
+        # fast path: health check. peek the first line; if it's /appstate, answer
+        # immediately without waiting for full headers.
+        try:
+            first = conn.recv(1024)
+        except Exception:
             return
-        with self._active_lock:
-            self._active += 1
-        super().process_request(request, client_address)
-
-    def process_request_thread(self, request, client_address):
+        data += first
+        if b"/appstate" in first.split(b"\r\n", 1)[0]:
+            with STATE_LOCK:
+                free = TOTAL - BUSY
+                healthy = free > 0
+            body = ('{"app":"northwind","workers_total":%d,"workers_free":%d,'
+                    '"healthy":%s}' % (TOTAL, free, "true" if healthy else "false")).encode()
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                         b"Access-Control-Allow-Origin: *\r\n"
+                         b"Content-Length: %d\r\nConnection: close\r\n\r\n%s"
+                         % (len(body), body))
+            return
+        # normal path: read until end-of-headers blank line. A slowloris that
+        # never sends it will block here until READ_TIMEOUT, holding this worker.
+        while b"\r\n\r\n" not in data:
+            try:
+                chunk = conn.recv(1024)
+            except Exception:
+                return          # timed out waiting: worker was held, now freed
+            if not chunk:
+                return
+            data += chunk
+        # got a full request: serve the page
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                     b"Access-Control-Allow-Origin: *\r\n"
+                     b"Content-Length: %d\r\nConnection: close\r\n\r\n%s"
+                     % (len(PORTAL_HTML), PORTAL_HTML))
+    finally:
+        with STATE_LOCK:
+            BUSY -= 1
         try:
-            super().process_request_thread(request, client_address)
-        finally:
-            with self._active_lock:
-                self._active -= 1
-            self._sem.release()
-
-    def free_workers(self):
-        return self.max_workers - self._active
-
-
-class Handler(BaseHTTPRequestHandler):
-    timeout = 20                 # a held connection occupies a worker up to 20s
-
-    def setup(self):
-        super().setup()
-        # give each connection a read timeout; slow clients hold the worker until
-        # this fires, which is what lets a slowloris exhaust the pool.
-        try:
-            self.connection.settimeout(self.timeout)
+            conn.close()
         except Exception:
             pass
 
-    def handle_one_request(self):
-        # BaseHTTPRequestHandler reads the request line + headers here. A slow
-        # client sending headers a byte at a time keeps this worker busy the
-        # whole time, exactly the Slowloris effect. We just let it block.
-        try:
-            super().handle_one_request()
-        except Exception:
-            self.close_connection = True
 
-    def log_message(self, *a):
-        pass
-
-    def do_GET(self):
-        if self.path.startswith("/appstate"):
-            free = self.server.free_workers()
-            body = ('{"app":"northwind","workers_total":%d,"workers_free":%d,'
-                    '"healthy":%s}' % (self.server.max_workers, free,
-                                       "true" if free > 0 else "false")).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        # normal page render
-        time.sleep(0.02)
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(PORTAL_HTML)
+def health_path_server(host, port):
+    """A separate always-responsive listener JUST for /appstate on port+1 is not
+    needed; /appstate is handled inline on the fast path above."""
+    pass
 
 
 def main():
-    global PORTAL_HTML
+    global TOTAL, PORTAL_HTML
     p = argparse.ArgumentParser()
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--html", default=None)
     args = p.parse_args()
-
+    TOTAL = args.workers
     if args.html:
         with open(args.html, "rb") as f:
             PORTAL_HTML = f.read()
-    else:
-        PORTAL_HTML = b"<!doctype html><h1>Northwind App</h1><p>online</p>"
 
-    srv = BoundedThreadingServer(("0.0.0.0", args.port), Handler,
-                                 max_workers=args.workers)
-    print(f"fragile app on 0.0.0.0:{args.port} with {args.workers} workers "
-          f"(backlog {srv.request_queue_size}); /appstate for health", flush=True)
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", args.port))
+    srv.listen(64)   # accept backlog; workers is the real limit
+    print(f"fragile app on 0.0.0.0:{args.port} with {TOTAL} deterministic workers; "
+          f"/appstate for health", flush=True)
+
+    sem = threading.BoundedSemaphore(TOTAL)
+
+    def worker(conn):
+        try:
+            handle_conn(conn)
+        finally:
+            sem.release()
+
+    while True:
+        conn, _ = srv.accept()
+        got = sem.acquire(blocking=False)
+        if not got:
+            # pool exhausted: refuse immediately (this is the app "down" for new
+            # visitors). Close without serving.
+            try:
+                conn.close()
+            except Exception:
+                pass
+            continue
+        threading.Thread(target=worker, args=(conn,), daemon=True).start()
 
 
 if __name__ == "__main__":
