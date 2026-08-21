@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Northwind Freight</title>
+<script>
+  // Show the real tracking site full-screen. The site itself visibly hangs and
+  // shows "servers are not responding" under attack, so no wrapper is needed.
+  (function(){
+    var q=new URLSearchParams(location.search);
+    var host=q.get("host")||localStorage.getItem("ad_display_host")||"127.0.0.1";
+    if(q.get("host")) localStorage.setItem("ad_display_host",host);
+    location.replace("http://"+host+":8000/");
+  })();
+</script>
+</head>
+<body><p>Loading Northwind…</p></body>
+</html>

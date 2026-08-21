@@ -3,76 +3,115 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Northwind Freight — Employee Portal</title>
+<title>Northwind Freight — Track a Shipment</title>
 <style>
-  :root{
-    --navy:#12263a; --sky:#2f6db3; --ice:#eef3f8;
-    --ink:#1a2b3c; --line:#d7e0ea; --ok:#2e7d5b; --paper:#ffffff;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
-    color:var(--ink);background:var(--ice)}
-  header{background:var(--navy);color:#fff;padding:14px 28px;display:flex;
-    align-items:center;gap:12px}
-  header .logo{width:30px;height:30px;border-radius:6px;
-    background:linear-gradient(135deg,#4a9de0,#2f6db3);display:grid;place-items:center;
-    font-weight:800;color:#fff;font-size:15px}
-  header b{font-size:16px;letter-spacing:.02em}
-  header span{margin-left:auto;font-size:13px;opacity:.8}
-  .wrap{max-width:420px;margin:56px auto;padding:0 20px}
-  .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
-    padding:32px;box-shadow:0 6px 24px rgba(18,38,58,.06)}
-  h1{margin:0 0 4px;font-size:20px;color:var(--navy)}
-  .sub{color:#6a7c8d;font-size:14px;margin-bottom:22px}
-  label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px;color:#33475b}
-  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;
-    font-size:15px}
-  input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 3px rgba(47,109,179,.15)}
-  button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:8px;
-    background:var(--sky);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
-  button:hover{background:#2860a0}
-  .foot{text-align:center;color:#8496a6;font-size:12px;margin-top:20px}
-  .health{max-width:420px;margin:0 auto 40px;padding:0 20px}
-  .pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#5a6b7b;
-    background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px}
-  .pill .d{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  :root{--navy:#12263a;--sky:#2f6db3;--ink:#1a2b3c;--line:#d7e0ea;--ok:#2e7d5b;
+    --paper:#fff;--ice:#eef3f8;--warn:#c1362b}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--ice)}
+  header{background:var(--navy);color:#fff;padding:16px 26px;display:flex;align-items:center;gap:12px}
+  header .logo{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#4a9de0,#2f6db3);
+    display:grid;place-items:center;font-weight:800;font-size:16px}
+  header b{font-size:17px}
+  header .nav{margin-left:auto;display:flex;gap:22px;font-size:14px;opacity:.85}
+  .hero{max-width:720px;margin:40px auto 0;padding:0 20px;text-align:center}
+  .hero h1{font-size:26px;color:var(--navy);margin-bottom:6px}
+  .hero p{color:#6a7c8d;margin-bottom:22px}
+  .track{display:flex;gap:10px;max-width:560px;margin:0 auto}
+  .track input{flex:1;padding:14px 16px;border:1px solid var(--line);border-radius:10px;font-size:16px}
+  .track input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 3px rgba(47,109,179,.15)}
+  .track button{padding:14px 26px;border:0;border-radius:10px;background:var(--sky);color:#fff;
+    font-size:16px;font-weight:700;cursor:pointer}
+  .track button:hover{background:#2860a0}
+  .track button:disabled{opacity:.7;cursor:wait}
+  .result{max-width:560px;margin:24px auto 60px;padding:0 20px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:24px;
+    box-shadow:0 6px 24px rgba(18,38,58,.06);display:none}
+  .card.show{display:block}
+  .card .row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:15px}
+  .card .row .k{color:#6a7c8d}
+  .card .status{font-size:20px;font-weight:800;color:var(--navy);margin-bottom:14px}
+  .steps{margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
+  .step{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:14px}
+  .step .dot{width:12px;height:12px;border-radius:50%;background:var(--line);flex:none}
+  .step.done .dot{background:var(--ok)}
+  .step.done{color:var(--ink)} .step{color:#9fb0c0}
+  .spinner{display:none;text-align:center;padding:30px;color:#6a7c8d}
+  .spinner.show{display:block}
+  .spinner .s{width:34px;height:34px;border:4px solid var(--line);border-top-color:var(--sky);
+    border-radius:50%;margin:0 auto 12px;animation:sp 1s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .err{display:none;text-align:center;padding:28px 24px}
+  .err.show{display:block}
+  .err .errbig{font-size:17px;font-weight:600;color:#5b6b7a}
+  .err .errsub{font-size:14px;color:#8a99a8;margin-top:4px}
 </style>
 </head>
 <body>
 <header>
   <div class="logo">N</div>
   <b>Northwind Freight</b>
-  <span>Employee Portal</span>
+  <div class="nav"><span>Track</span><span>Ship</span><span>Support</span></div>
 </header>
 
-<div class="wrap">
-  <div class="card">
-    <h1>Sign in</h1>
-    <div class="sub">Use your Northwind network credentials.</div>
-    <form onsubmit="event.preventDefault();fakeLogin()">
-      <label for="u">Username</label>
-      <input id="u" autocomplete="username" placeholder="j.rivera">
-      <label for="p">Password</label>
-      <input id="p" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button type="submit">Sign in</button>
-    </form>
-    <div class="foot">Northwind Freight Systems · internal use only</div>
+<div class="hero">
+  <h1>Track a shipment</h1>
+  <p>Enter your tracking number to see live status.</p>
+  <div class="track">
+    <input id="tid" placeholder="e.g. NW4837201" value="NW4837201">
+    <button id="btn">Track</button>
   </div>
 </div>
 
-<div class="health">
-  <span class="pill"><span class="d"></span> portal status: operational</span>
+<div class="result">
+  <div class="spinner" id="spinner"><div class="s"></div><span id="spinTxt">Contacting Northwind servers…</span></div>
+  <div class="err" id="err"><div class="errbig">This site can't be reached right now.</div><div class="errsub">The server took too long to respond.</div></div>
+  <div class="card" id="card">
+    <div class="status" id="st">—</div>
+    <div class="row"><span class="k">Tracking #</span><span id="rid">—</span></div>
+    <div class="row"><span class="k">Origin</span><span id="orig">—</span></div>
+    <div class="row"><span class="k">Destination</span><span id="dest">—</span></div>
+    <div class="row"><span class="k">Estimated delivery</span><span id="eta">—</span></div>
+    <div class="steps" id="steps"></div>
+  </div>
 </div>
 
 <script>
-function fakeLogin(){
-  // this is a demo portal; the login is illustrative. real auth attempts in the
-  // demo target SSH, which the detector watches.
-  const b = document.querySelector("button");
-  b.textContent = "Checking…";
-  setTimeout(()=>{ b.textContent="Invalid credentials"; b.style.background="#b5462f";
-    setTimeout(()=>{ b.textContent="Sign in"; b.style.background=""; }, 1400); }, 500);
+const $=s=>document.querySelector(s);
+// the app calls /track on the SAME server; use a relative URL so it works via any host
+async function track(){
+  const id=$("#tid").value.trim()||"NW0000000";
+  $("#btn").disabled=true; $("#btn").textContent="Tracking…";
+  $("#card").classList.remove("show"); $("#err").classList.remove("show");
+  $("#spinTxt").textContent="Contacting Northwind servers…";
+  $("#spinner").classList.add("show");
+  const still=setTimeout(()=>{ $("#spinTxt").textContent="Still trying…"; }, 4000);
+  try{
+    const c=new AbortController(); const t=setTimeout(()=>c.abort(), 9000);
+    const r=await fetch("/track?id="+encodeURIComponent(id), {cache:"no-store", signal:c.signal});
+    clearTimeout(t);
+    const j=await r.json();
+    clearTimeout(still);
+    $("#spinner").classList.remove("show");
+    $("#st").textContent=j.status;
+    $("#rid").textContent=j.id; $("#orig").textContent=j.origin;
+    $("#dest").textContent=j.destination; $("#eta").textContent=j.eta;
+    $("#steps").innerHTML="";
+    j.steps.forEach(s=>{ const d=document.createElement("div");
+      d.className="step"+(s.done?" done":""); d.innerHTML='<span class="dot"></span>'+s.name;
+      $("#steps").appendChild(d); });
+    $("#card").classList.add("show");
+  }catch(e){
+    // request hung or failed: the server is overwhelmed. This is what a real
+    // visitor sees during an attack - the site does not work.
+    clearTimeout(still);
+    $("#spinner").classList.remove("show");
+    $("#err").classList.add("show");
+  }
+  $("#btn").disabled=false; $("#btn").textContent="Track";
 }
+$("#btn").onclick=track;
+$("#tid").addEventListener("keydown",e=>{ if(e.key==="Enter") track(); });
 </script>
 </body>
 </html>

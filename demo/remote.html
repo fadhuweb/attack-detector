@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attack Remote</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--line:#21262d;--ink:#e6edf3;--dim:#8b949e;
+    --off:#6e7681;--monitor:#3b82f6;--enforce:#2e7d5b;--atk:#e5484d}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;
+    padding:16px;max-width:520px;margin:0 auto;-webkit-tap-highlight-color:transparent}
+  h1{font-size:15px;font-weight:600;color:var(--dim);text-align:center;margin-bottom:14px;
+    text-transform:uppercase;letter-spacing:.08em}
+  .mode{text-align:center;padding:20px;border-radius:14px;background:var(--panel);
+    border:1px solid var(--line);margin-bottom:8px}
+  .mode .label{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .mode .val{font-size:34px;font-weight:800;margin-top:4px}
+  .mode .val[data-m="off"]{color:var(--off)}
+  .mode .val[data-m="monitor"]{color:var(--monitor)}
+  .mode .val[data-m="enforce"]{color:var(--enforce)}
+  .site{text-align:center;font-size:14px;font-weight:700;padding:10px;border-radius:10px;margin-bottom:16px}
+  .site.up{background:#0f2a1c;color:#5bd68f} .site.down{background:#3a1416;color:#ff9b8a}
+  .grp{margin-bottom:18px}
+  .grp h2{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;
+    margin-bottom:8px;padding-left:4px}
+  button{display:block;width:100%;font-family:inherit;font-size:17px;font-weight:600;
+    padding:18px;border-radius:12px;border:1px solid var(--line);background:#21262d;
+    color:var(--ink);margin-bottom:10px;cursor:pointer}
+  button:active{transform:scale(.98)}
+  .atk{background:#2a1614;border-color:#5a2b24;color:#ff9b8a}
+  .reset{background:#1a2430;border-color:#2f4b6e;color:#8fbce8}
+  .modebtns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .modebtns button{font-size:14px;padding:14px 6px;margin:0}
+  .modebtns button.active[data-set="off"]{border-color:var(--off);color:var(--off)}
+  .modebtns button.active[data-set="monitor"]{border-color:var(--monitor);color:var(--monitor)}
+  .modebtns button.active[data-set="enforce"]{border-color:var(--enforce);color:var(--enforce)}
+  .msg{text-align:center;font-size:13px;color:var(--dim);min-height:18px;margin-top:8px}
+  details{margin-top:24px;color:var(--dim);font-size:12px}
+  details input{font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);
+    border-radius:6px;background:#0b0f14;color:var(--ink);width:100%;margin:4px 0}
+</style>
+</head>
+<body>
+<h1>Attack Detector · Remote</h1>
+
+<div class="mode">
+  <div class="label">Defense</div>
+  <div class="val" id="modeVal" data-m="">—</div>
+</div>
+<div class="site up" id="siteState">site: —</div>
+
+<div class="grp">
+  <h2>Defense mode</h2>
+  <div class="modebtns">
+    <button data-set="off">Off</button>
+    <button data-set="monitor">Monitor</button>
+    <button data-set="enforce">Enforce</button>
+  </div>
+</div>
+
+<div class="grp">
+  <h2>Attacks (auto-stop 30s)</h2>
+  <button class="atk" data-atk="bruteforce">Brute force</button>
+  <button class="atk" data-atk="app_flood">Denial of service · traffic flood</button>
+  <button class="atk" data-atk="app_conn_exhaust">Denial of service · connection exhaustion</button>
+</div>
+
+<div class="grp">
+  <button class="reset" id="reset">Reset (unblock + stop)</button>
+</div>
+<div class="msg" id="msg"></div>
+
+<details>
+  <summary>Setup</summary>
+  <div>host (e.g. 192.168.1.3) <input id="host" placeholder="192.168.1.3"></div>
+  <div>launcher token <input id="ltok" placeholder="pickatoken"></div>
+  <div>API token <input id="atok" placeholder="detector token"></div>
+  <button id="save" style="margin-top:8px">Save</button>
+</details>
+
+<script>
+const $=s=>document.querySelector(s);
+const cfg=Object.assign({host:"127.0.0.1",ltok:"pickatoken",atok:"",attacker:"192.168.50.11"},
+  JSON.parse(localStorage.getItem("ad_remote_cfg")||"{}"));
+const q=new URLSearchParams(location.search);
+if(q.get("host")) cfg.host=q.get("host");
+$("#host").value=cfg.host; $("#ltok").value=cfg.ltok; $("#atok").value=cfg.atok;
+function urls(){ return {
+  launch:"http://"+cfg.host+":8090",
+  api:"http://"+cfg.host+":8787/api",
+  app:"http://"+cfg.host+":8000/appstate"
+};}
+$("#save").onclick=()=>{ cfg.host=$("#host").value.trim(); cfg.ltok=$("#ltok").value.trim();
+  cfg.atok=$("#atok").value.trim(); localStorage.setItem("ad_remote_cfg",JSON.stringify(cfg));
+  $("#msg").textContent="saved"; };
+
+function flash(t){ $("#msg").textContent=t; setTimeout(()=>{$("#msg").textContent="";},2500); }
+
+async function launch(kind){
+  try{ const r=await fetch(urls().launch+"/start",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Auth-Token":cfg.ltok},
+    body:JSON.stringify({kind})}); const j=await r.json();
+    flash(j.ok? "launched: "+kind : (j.message||"failed")); }catch(e){ flash("launcher unreachable"); }
+}
+async function setMode(m){
+  try{ await fetch(urls().api+"/mode",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+    body:JSON.stringify({mode:m})}); flash("mode: "+m); poll(); }catch(e){ flash("detector unreachable"); }
+}
+$("#reset").onclick=async ()=>{
+  try{ await fetch(urls().launch+"/stop",{method:"POST",headers:{"X-Auth-Token":cfg.ltok}}); }catch(e){}
+  try{
+    await fetch(urls().api+"/unblock",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+      body:JSON.stringify({ip:cfg.attacker})});
+    await fetch(urls().api+"/unlimit",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Auth-Token":cfg.atok},
+      body:JSON.stringify({ip:cfg.attacker})});
+    flash("reset: attacker unblocked");
+  }catch(e){ flash("reset failed"); }
+};
+document.querySelectorAll(".atk").forEach(b=>b.onclick=()=>launch(b.dataset.atk));
+document.querySelectorAll(".modebtns button").forEach(b=>b.onclick=()=>setMode(b.dataset.set));
+
+async function poll(){
+  try{
+    const r=await fetch(urls().api+"/status",{headers:{"X-Auth-Token":cfg.atok}});
+    const s=await r.json();
+    $("#modeVal").textContent=s.mode; $("#modeVal").dataset.m=s.mode;
+    document.querySelectorAll(".modebtns button").forEach(b=>
+      b.classList.toggle("active",b.dataset.set===s.mode));
+  }catch(e){ $("#modeVal").textContent="offline"; }
+  try{
+    const r=await fetch(urls().app,{cache:"no-store"}); const j=await r.json();
+    const el=$("#siteState");
+    if(j.healthy){ el.className="site up"; el.textContent="site: Online"; }
+    else { el.className="site down"; el.textContent="site: DOWN"; }
+  }catch(e){ $("#siteState").className="site down"; $("#siteState").textContent="site: DOWN"; }
+}
+poll(); setInterval(poll, 1500);
+</script>
+</body>
+</html>
