@@ -1,241 +1,248 @@
 # attack-detector
 
-Server intrusion detection and response for a single Linux host. See CLAUDE.md
-for the full three-week plan. This is through day 3.
+A lightweight intrusion detection and response system for a single Linux server.
+It watches authentication logs, the web-server access log, and the live TCP
+connection table, detects five common attack patterns, and responds, either by
+alerting only (monitor) or by blocking offenders in the firewall (enforce).
 
-## What works now (days 1-3)
+It ships with a self-contained demo: a fake logistics company ("Northwind
+Freight") whose shipment-tracking site is taken down by a real attack and kept
+online by the detector, controllable from a phone.
 
-Collector, brute-force detection, and blocking. Tails the SSH auth log, counts
-failed logins per source IP in a sliding window, alerts on the threshold, and in
-enforce mode blocks the offender with nftables. The admin allowlist is never
-blocked.
+---
 
-- events.py - the Event record
-- collectors/tailer.py - tail -F: survives rotation and truncate
-- collectors/auth_collector.py - sshd parser, file + journald
-- detectors/window_counter.py - per-key sliding-window counter
-- detectors/bruteforce.py - brute-force rule with invalid-user pairing
-- alerting.py - alerts to stdout and alerts.log
-- responder.py - nftables blocking, allowlist + mode gated
-- config.py - defaults, config.yaml, and the enforce safety guard
-- engine.py - runs collector, detector, alerter, responder
+## What it does
 
-## The three modes
+The engine runs as a systemd service and reads three live sources:
 
-- off: nothing runs.
-- monitor: detect and alert, never block. Safe default. Test here first.
-- enforce: detect, alert, and block offenders. Refuses to start if the allowlist
-  is empty.
+- **`/var/log/auth.log`** for SSH authentication (brute-force detection).
+- **the nginx access log** for HTTP request volume (flood detection).
+- **the kernel connection table via `ss`** for connection-level attacks
+  (SYN flood and Slowloris), which never touch an application log.
 
-## Safety design (read before enforce)
+When a rule fires it writes an alert. In enforce mode it also acts: a full
+firewall block for connection-holding and brute-force attackers, a rate-limit
+for high-volume single-source floods so a shared address is slowed rather than
+cut off. Your own admin path is on an allowlist and is never blocked.
 
-1. The allowlist is checked on every block. An alert for an allowlisted IP is
-   logged and skipped, never blocked. This stops the tool blocking the address
-   you administer the host from.
-2. enforce with an empty allowlist refuses to start (exit 2). Blocking cannot go
-   live unconfigured.
-3. Blocking uses a dedicated nftables table `attack_detector` with its own sets.
-   It never touches your other firewall rules. Remove all blocks with:
-       sudo nft flush table inet attack_detector
-   or delete the whole table with:
-       sudo nft delete table inet attack_detector
+### The five detectors
 
-## Run it (on the target VM)
+| Rule | Source | Fires when | Enforce action |
+|------|--------|-----------|----------------|
+| Brute force | auth log | > 5 failed logins from one IP in 60s | block IP |
+| Aggregate flood | nginx log | > 2000 total requests in 10s (distributed) | alert |
+| Per-IP request flood | nginx log | > 100 requests from one IP in 5s | rate-limit IP |
+| SYN flood | `ss` | > 100 half-open (SYN-RECV) connections | alert |
+| Connection hold (Slowloris) | `ss` | > N held connections from one IP | block IP + kill its connections |
 
-    cd ~/attack-detector
-    chmod +x scripts/*.sh
-    ./scripts/run.sh                 # monitor mode from config.yaml
+All thresholds are configurable in `config.yaml`.
 
-Blocking needs root (nft edits the firewall). To test enforce:
+### Three modes
 
-    sudo python3 -m attack_detector.engine -c config.yaml --mode enforce
+- **off** — do nothing.
+- **monitor** — detect and alert, never block. Safe default.
+- **enforce** — detect, alert, and block or rate-limit offenders via nftables.
 
-Confirm the allowlist has your admin IP (10.0.2.2) first, or it will refuse.
+Mode changes live without a restart (the engine polls a control file), so you can
+flip monitor to enforce mid-attack.
 
-## Tests (run by file path from the repo root)
+---
 
-    python3 tests/test_auth_parser.py
-    python3 tests/test_tailer_rotation.py
-    python3 tests/test_bruteforce.py
-    python3 tests/test_responder.py
+## Architecture
 
-The responder test uses a fake nft runner, so it needs no root. Verify real
-blocking on the target (see below).
+```
+attack_detector/
+  engine.py            main loop: wires collectors -> detectors -> responder
+  events.py            the Event type passed between stages
+  config.py            config loading + defaults
+  controller.py        live control: reads control.json, drains commands.jsonl,
+                       writes status.json
+  ctl.py               command-line control (set mode, block, unblock, status)
 
-## Verify real blocking on the target
+  collectors/
+    tailer.py          follows a log file across rotation
+    auth_collector.py  parses sshd auth lines into events
+    access_collector.py parses nginx access lines into events
 
-1. Set admin_allowlist to your admin IP (10.0.2.2) in config.yaml.
-2. Run enforce as root:  sudo ./scripts/run.sh --mode enforce  (or the python line above)
-3. From the ATTACKER VM (192.168.50.11), brute-force the target:
-       for i in $(seq 1 8); do sshpass -p wrong ssh -o PreferredAuthentications=password \
-         -o PubkeyAuthentication=no -o StrictHostKeyChecking=no bad@192.168.50.10; done
-4. Watch for BLOCK src=192.168.50.11. Then confirm the attacker can no longer
-   reach the target:  from the attacker,  ssh bad@192.168.50.10  should now hang/fail.
-5. Confirm YOUR admin SSH from Windows still works (10.0.2.2 is allowlisted).
-6. Clean up:  sudo nft flush table inet attack_detector
+  detectors/
+    window_counter.py  shared sliding-window counter
+    bruteforce.py      failed-login-per-IP rule
+    flood.py           aggregate volumetric rule
+    request_rate.py    per-IP request-rate rule
+    connstate.py       SYN-flood + Slowloris rule (samples ss)
 
-## Install as a service (day 18)
+  alerting.py          formats and writes alerts
+  responder.py         MemoryBackend (dry run) and NftablesBackend (real blocking)
+  api/
+    server.py          Flask API + operator dashboard
+```
 
-One-command install that runs the engine and dashboard as systemd services:
+**Runtime data** lives in `/var/lib/attack-detector/`: `control.json` (desired
+mode), `commands.jsonl` (queued block/unblock), `status.json` (current state),
+`alerts.log`, `responder.log`.
 
-    sudo bash deploy/install.sh
+**The firewall** uses a dedicated nftables table, `inet attack_detector`, so it
+never interferes with your other rules. Blocking an IP also kills its existing
+connections, so a held attack is released immediately instead of lingering until
+TCP timeout.
 
-It installs dependencies, lays the app in /opt/attack-detector, writes config to
-/etc/attack-detector/, generates an API token, and starts both services (engine
-and API) as root so they share the runtime files in /var/lib/attack-detector.
-This is what fixes the earlier permission mismatch from running them by hand.
-Full guide in deploy/INSTALL.md. Set admin_allowlist before using enforce.
+---
 
-## Dashboard (day 17)
+## Requirements
 
-The API serves a single-page dashboard at `/`. It shows the current mode with
-off/monitor/enforce buttons, the blocked and rate-limited lists with release
-buttons, and a live alert feed colour-coded by rule. It polls the API every 2s.
+- Linux (tested on Ubuntu Server 24.04) with `nftables` and `ss` (iproute2).
+- Python 3.11+.
+- `PyYAML` and `Flask` (see `requirements.txt`).
+- Root, for the engine to read logs and manage nftables.
 
-Reach it (localhost only) over an SSH tunnel from your workstation:
+Install Flask and PyYAML on Ubuntu (externally-managed Python):
 
-    # on your machine (Windows PowerShell or any ssh):
-    ssh -L 8787:127.0.0.1:8787 target@localhost -p 2222
-    # then open http://127.0.0.1:8787/ in your browser
+```bash
+sudo apt install -y python3-flask python3-yaml
+# or: pip install -r requirements.txt --break-system-packages
+```
 
-If the API requires a token, paste it into the Access box on the page. The page
-is static; every action it takes still goes through the token-guarded API.
+---
 
-## Control API (day 15)
+## Install
 
-A small Flask API is the web front end over the same control files the ctl CLI
-uses. It does not run detection; it reads status.json / alerts.log and writes
-control.json / commands.jsonl. Bind to localhost, require a token.
+From the repository root on the server:
 
-Run it (alongside the engine):
+```bash
+sudo bash deploy/install.sh
+```
 
-    AD_API_TOKEN=$(openssl rand -hex 16)   # pick a token
-    python3 -m attack_detector.api.server -c config.yaml --port 8787 --token "$AD_API_TOKEN"
+This copies the package to `/opt/attack-detector`, installs the config to
+`/etc/attack-detector/config.yaml`, creates `/var/lib/attack-detector/`, and
+installs and starts two systemd services:
 
-Endpoints (all except /api/health require X-Auth-Token when a token is set):
+- `attack-detector` — the detection/response engine.
+- `attack-detector-api` — the API and dashboard.
 
-    GET  /api/health                 -> {"ok": true}
-    GET  /api/status                 -> mode, blocked, limited, allowlist, thresholds
-    GET  /api/alerts?n=50            -> recent alert lines
-    POST /api/mode      {"mode": "..."}   -> off | monitor | enforce
-    POST /api/unblock   {"ip": "..."}
-    POST /api/unlimit   {"ip": "..."}
-    POST /api/block     {"ip": "..."}
+Both are enabled, so they survive a reboot. See `deploy/INSTALL.md` for details.
 
-Example:
+To remove everything:
 
-    curl -H "X-Auth-Token: $AD_API_TOKEN" http://127.0.0.1:8787/api/status
-    curl -X POST -H "X-Auth-Token: $AD_API_TOKEN" -H "Content-Type: application/json" \
-         -d '{"mode":"enforce"}' http://127.0.0.1:8787/api/mode
+```bash
+sudo bash deploy/uninstall.sh
+```
 
-Security: the API controls the firewall, so keep it bound to 127.0.0.1 and reach
-it over an SSH tunnel. Never expose it on a public interface. The dashboard
-(day 17) is served from this same API.
+### Important: services run from `/opt`, not your home directory
 
-## Connection-state rule: SYN flood and Slowloris (day 11)
+The systemd services run the copy in `/opt/attack-detector`. Editing files in
+your home clone does nothing until you copy them into `/opt` and restart:
 
-These attacks carry almost no request volume, so every log-based rule misses
-them. This rule samples the TCP connection table with `ss` on a timer instead of
-reading a log.
+```bash
+sudo cp -r attack_detector/* /opt/attack-detector/attack_detector/
+sudo systemctl restart attack-detector
+```
 
-- SYN flood: many half-open connections (state SYN-RECV). Fires syn_flood when
-  the count passes syn_threshold. SYN sources are often spoofed, so this alerts
-  rather than blocks.
-- Slowloris: one IP holds many established connections open with almost no
-  traffic. Fires conn_hold when one IP's established count passes conn_threshold.
-  That IP is real, so it is blocked in enforce mode (allowlist still applies).
+The engine caches code in memory, so **always restart after deploying a change.**
 
-Simulate from the attacker VM:
+---
 
-    # SYN flood (short bursts), confirm with ss on the target:
-    sudo hping3 -S --flood -p 80 192.168.50.10
-    #   on target:  watch -n1 'ss -tan state syn-recv | wc -l'
+## Configuration
 
-    # Slowloris:
-    sudo apt install -y slowhttptest
-    slowhttptest -c 300 -H -u http://192.168.50.10/ -i 10 -r 200
-    #   on target:  ss -tan state established | grep <attacker-ip> | wc -l
+Edit `/etc/attack-detector/config.yaml`. Key settings:
 
-Tune syn_threshold and conn_threshold above your normal connection counts.
+```yaml
+mode: monitor                    # off | monitor | enforce
+admin_allowlist: ["10.0.2.2"]    # never blocked - YOUR admin path
+responder_backend: nftables      # nftables (real) | memory (dry run)
 
-## Rate-limiting as the flood response (day 10)
+bf_threshold: 5                  # failed logins per IP / 60s
+flood_threshold: 2000            # total requests / 10s
+req_threshold: 100               # requests per IP / 5s
+req_rate_limit: 20               # rate-limit a flooding IP to N req/s (enforce)
+syn_threshold: 100               # half-open connections -> syn flood
+conn_threshold: 50               # held connections per IP -> slowloris
+connstate_interval: 5            # seconds between ss samples
+```
 
-In enforce mode, a single-source request flood is RATE-LIMITED, not hard-blocked:
-nftables caps the offending IP to req_rate_limit requests/second and drops the
-excess. This is gentler than a full block, so legitimate traffic from a shared
-address (many users behind one NAT) still gets through while the flood is
-throttled.
+**`admin_allowlist` is a safety rail.** Enforce refuses to start with an empty
+allowlist, so you cannot lock yourself out. Put your admin source IP here and
+never put an attacker's IP here.
 
-- gated by mode and allowlist, exactly like blocking. The admin IP is never
-  rate-limited.
-- reversible live:  python3 -m attack_detector.ctl unlimit <ip>
-- a distributed flood has no single IP to limit, so it still only alerts.
-- rate-limits live in a separate nftables chain; remove all with the same
-  table flush:  sudo nft flush table inet attack_detector
+---
 
-## Distributed vs single-source floods (day 9)
+## Operating it
 
-Two request-rate rules run on the access log:
-- aggregate (day 8): total requests across all IPs -> catches distributed floods.
-- per-IP (day 9): requests from one IP -> catches single-source floods.
+Control the running engine with `ctl.py` (or the dashboard):
 
-The point of running both is the contrast:
-- a DISTRIBUTED flood trips the aggregate rule but NOT the per-IP rule, because
-  no single IP is individually busy.
-- a SINGLE-SOURCE flood trips both.
+```bash
+python3 -m attack_detector.ctl status              # current mode + blocked IPs
+python3 -m attack_detector.ctl mode enforce        # switch mode live
+python3 -m attack_detector.ctl unblock 1.2.3.4     # release an IP
+```
 
-Simulate each with the included tool (writes to the access log the engine tails):
+The **dashboard** is served by the API service. Browse to the host on the API
+port (default 8787). It needs the API token from `/etc/attack-detector/api.env`,
+sent as the `X-Auth-Token` header.
 
-    # distributed: many IPs, few requests each -> aggregate fires, per-IP quiet
-    sudo python3 scripts/simulate_flood.py --distributed --requests 3000 --ips 500 \
-        --log /var/log/nginx/access.log
+Handy resets:
 
-    # single-source: one IP, all requests -> both fire
-    sudo python3 scripts/simulate_flood.py --single --requests 3000 \
-        --ip 192.168.50.11 --log /var/log/nginx/access.log
+```bash
+# force monitor mode
+echo '{"mode":"monitor"}' | sudo tee /var/lib/attack-detector/control.json
 
-For a real network-level single-source flood, ab from the attacker VM also works:
-    ab -n 5000 -c 200 http://192.168.50.10/
-Spoofing many real source IPs over the lab network is unreliable through NAT, so
-the simulator is the deterministic way to exercise the distributed case.
+# clear all firewall blocks
+sudo nft flush table inet attack_detector
+```
 
-## Aggregate flood detection (day 8)
+---
 
-A second detector counts TOTAL http requests across all source IPs in a short
-window and fires above a ceiling. This catches a distributed flood that per-IP
-rules miss: when a flood is spread across thousands of IPs, no single IP crosses
-a per-IP threshold, but the total volume is far above normal.
+## Tests
 
-- reads the nginx access log (access_log in config.yaml)
-- fires on flood_threshold total requests in flood_window seconds
-- reports the heaviest source IPs in the alert, though the fire decision is the
-  aggregate total, not any one IP
-- a distributed flood has no single IP to block, so day 8 alerts only.
-  Rate-limiting as the flood response is day 10.
+Ten test suites cover the parsers, detectors, responder, controller, and API.
+Run them from the repository root:
 
-Simulate a distributed flood from the attacker (many parallel workers):
+```bash
+for t in tests/test_*.py; do python3 "$t"; done
+```
 
-    ab -n 5000 -c 200 http://192.168.50.10/        # apache bench, one host many requests
-    # or spread across fake sources with parallel curl loops
+All should print `all checks passed`.
 
-Tune flood_threshold above your normal peak traffic, or it will false-fire.
+---
 
-## Live control without restart (day 4)
+## The demo
 
-The engine watches control files while it runs. Change mode or release an IP with
-no restart, using the ctl helper:
+The `demo/` folder is a complete, self-contained demonstration: a shipment-
+tracking site that a real connection-exhaustion attack makes unusable, and that
+the detector keeps online in enforce mode. It is designed to be driven from a
+phone while the audience watches the site on a PC.
 
-    python3 -m attack_detector.ctl status              # show mode, blocked IPs, uptime
-    python3 -m attack_detector.ctl mode enforce        # flip to enforce live
-    python3 -m attack_detector.ctl mode monitor        # back to alert-only
-    python3 -m attack_detector.ctl mode off            # stop acting
-    python3 -m attack_detector.ctl unblock 192.168.50.11   # release a blocked IP
-    python3 -m attack_detector.ctl block 203.0.113.7       # block manually (allowlist still applies)
+See **`demo/README_demo.md`** for the full runbook and **`demo/PHONE_SETUP.md`**
+for phone/network setup. In short:
 
-Switching to enforce with an empty allowlist is refused at runtime, the same
-guard as startup. The status file (status.json) is what the week-3 dashboard
-reads.
+- `demo/app/fragile_server.py` — the Northwind tracking app. A fixed worker pool;
+  each request needs a worker. Under a connection-exhaustion attack the pool
+  fills and real visitors' requests hang, the authentic experience of an
+  overwhelmed server.
+- `demo/site/index.html` — the tracking page (enter a number, get shipment
+  status). Hangs and shows a timeout message when the server is saturated.
+- `demo/slowloris_hold.py` — a hold-open connection attack that exhausts the pool.
+- `demo/launcher.py` — a token-gated launcher that fires attacks on command.
+- `demo/display.html` — full-screen site view for the PC (the audience screen).
+- `demo/remote.html` — the phone remote: big mode indicator, attack buttons, and
+  a Reset that clears the firewall block between rounds.
 
-## Sync from Windows
+### The story it tells
 
-    scp -P 2222 -r C:\Users\fadhl\Desktop\attack-detector target@localhost:~/
+1. A visitor tracks a shipment on the live site. It works.
+2. Attack launched, detector in **monitor**: the site hangs. Real customers can't
+   use it. The detector sees the attack but only watches.
+3. Detector switched to **enforce**: the same attack is launched, the detector
+   blocks the attacker within seconds and kills its connections, and the site
+   stays usable throughout.
+
+Same real attack, opposite outcomes. Nothing is faked, real connections, real
+detection, a real firewall block, real recovery.
+
+---
+
+
+---
+
+## License
+
+Private project. All rights reserved.
